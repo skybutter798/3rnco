@@ -6,6 +6,7 @@ import test from "node:test";
 const baseMigration = await readFile(new URL("../drizzle/0000_rare_kabuki.sql", import.meta.url), "utf8");
 const rateMigration = await readFile(new URL("../drizzle/0001_regular_lionheart.sql", import.meta.url), "utf8");
 const commerceMigration = await readFile(new URL("../drizzle/0002_atomic_commerce.sql", import.meta.url), "utf8");
+const commerceTriggers = await readFile(new URL("../worker/atomic-commerce-triggers.sql", import.meta.url), "utf8");
 const commerceSource = await readFile(new URL("../worker/commerce.ts", import.meta.url), "utf8");
 const adminSource = await readFile(new URL("../worker/admin.ts", import.meta.url), "utf8");
 
@@ -32,6 +33,7 @@ function setupDatabase() {
   applyMigration(db, baseMigration);
   applyMigration(db, rateMigration);
   applyMigration(db, commerceMigration);
+  applyMigration(db, commerceTriggers);
   db.exec(`
     INSERT INTO users (id, username, username_normalized, password_hash, role, status)
       VALUES ('admin-1', 'admin', 'admin', 'hash', 'ADMIN', 'ACTIVE');

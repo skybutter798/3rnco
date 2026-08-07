@@ -1,27 +1,37 @@
 import migrationSql from "../drizzle/0000_rare_kabuki.sql?raw";
 import authRateLimitMigration from "../drizzle/0001_regular_lionheart.sql?raw";
 import atomicCommerceMigration from "../drizzle/0002_atomic_commerce.sql?raw";
+import atomicCommerceTriggers from "./atomic-commerce-triggers.sql?raw";
 import { seedProductionDatabase } from "./seed";
 
 const SCHEMA_VERSION = "3";
+const COMMERCE_TRIGGER_VERSION = "1";
 const RESERVATION_TTL_SECONDS = 24 * 60 * 60;
 const initializationByDatabase = new WeakMap<object, Promise<void>>();
 const lastMaintenanceByDatabase = new WeakMap<object, number>();
 
 function idempotentMigrationStatement(statement: string): string {
   return statement
-    .replace(/^CREATE TABLE\s+/iu, "CREATE TABLE IF NOT EXISTS ")
-    .replace(/^CREATE UNIQUE INDEX\s+/iu, "CREATE UNIQUE INDEX IF NOT EXISTS ")
-    .replace(/^CREATE INDEX\s+/iu, "CREATE INDEX IF NOT EXISTS ")
-    .replace(/^CREATE TRIGGER\s+/iu, "CREATE TRIGGER IF NOT EXISTS ");
+    .replace(/^CREATE TABLE(?!\s+IF\s+NOT\s+EXISTS)\s+/iu, "CREATE TABLE IF NOT EXISTS ")
+    .replace(/^CREATE UNIQUE INDEX(?!\s+IF\s+NOT\s+EXISTS)\s+/iu, "CREATE UNIQUE INDEX IF NOT EXISTS ")
+    .replace(/^CREATE INDEX(?!\s+IF\s+NOT\s+EXISTS)\s+/iu, "CREATE INDEX IF NOT EXISTS ")
+    .replace(/^CREATE TRIGGER(?!\s+IF\s+NOT\s+EXISTS)\s+/iu, "CREATE TRIGGER IF NOT EXISTS ");
 }
 
-export function getMigrationStatements(): string[] {
-  return [migrationSql, authRateLimitMigration, atomicCommerceMigration].join("\n--> statement-breakpoint\n")
+function splitMigrationSql(...sources: string[]): string[] {
+  return sources.join("\n--> statement-breakpoint\n")
     .split("--> statement-breakpoint")
     .map((statement) => statement.trim())
     .filter(Boolean)
     .map(idempotentMigrationStatement);
+}
+
+export function getMigrationStatements(): string[] {
+  return splitMigrationSql(migrationSql, authRateLimitMigration, atomicCommerceMigration);
+}
+
+export function getTriggerStatements(): string[] {
+  return splitMigrationSql(atomicCommerceTriggers);
 }
 
 async function initializeDatabase(db: D1Database): Promise<void> {
@@ -38,6 +48,19 @@ async function initializeDatabase(db: D1Database): Promise<void> {
       VALUES ('schema_version', ?, unixepoch())
       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = unixepoch()`)
       .bind(SCHEMA_VERSION).run();
+  }
+
+  const triggerVersion = await db.prepare(
+    "SELECT value FROM app_state WHERE key = 'commerce_trigger_version'",
+  ).first<{ value: string }>();
+  if (triggerVersion?.value !== COMMERCE_TRIGGER_VERSION) {
+    await db.batch([
+      ...getTriggerStatements().map((statement) => db.prepare(statement)),
+      db.prepare(`INSERT INTO app_state (key, value, updated_at)
+        VALUES ('commerce_trigger_version', ?, unixepoch())
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = unixepoch()`)
+        .bind(COMMERCE_TRIGGER_VERSION),
+    ]);
   }
 
   await seedProductionDatabase(db);
