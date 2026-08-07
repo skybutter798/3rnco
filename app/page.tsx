@@ -829,7 +829,7 @@ export default function Home() {
                     <strong>{money(product.price)}</strong>
                   </div>
                   <p className="product-card__desc">{product.description}</p>
-                  <button className="add-link" onClick={() => addToCart(product)}>Add to ritual <Plus size={16} /></button>
+                  <button className="add-link" disabled={(inventory[product.id] || 0) <= 0} onClick={() => addToCart(product)}>{(inventory[product.id] || 0) > 0 ? <>Add to ritual <Plus size={16} /></> : "Out of stock"}</button>
                 </article>
               ))}
             </div>
