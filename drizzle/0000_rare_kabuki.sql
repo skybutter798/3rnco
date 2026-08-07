@@ -635,4 +635,3 @@ CREATE TABLE `users` (
 CREATE UNIQUE INDEX `uq_users_username_normalized` ON `users` (`username_normalized`);--> statement-breakpoint
 CREATE UNIQUE INDEX `uq_users_email_normalized` ON `users` (`email_normalized`);--> statement-breakpoint
 CREATE INDEX `idx_users_role_status` ON `users` (`role`,`status`);
---> statement-breakpoint

@@ -352,6 +352,24 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    const applyBrowserRoute = () => {
+      const route = window.location.pathname.replace(/\/+$/, "") || "/";
+      if (route === "/admin" || route.startsWith("/admin/")) {
+        setView("admin");
+        setAccountOpen(false);
+      } else if (route === "/account" || route.startsWith("/account/")) {
+        setView("store");
+        setAccountOpen(true);
+      } else {
+        setView("store");
+      }
+    };
+    applyBrowserRoute();
+    window.addEventListener("popstate", applyBrowserRoute);
+    return () => window.removeEventListener("popstate", applyBrowserRoute);
+  }, []);
+
+  useEffect(() => {
     const onScroll = () => setHeaderSolid(window.scrollY > 30);
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
@@ -623,6 +641,8 @@ export default function Home() {
   const switchView = (next: "store" | "admin") => {
     setView(next);
     setNavOpen(false);
+    const route = next === "admin" ? "/admin" : "/";
+    if (window.location.pathname !== route) window.history.pushState(null, "", route);
     const behavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
     window.scrollTo({ top: 0, behavior });
   };
@@ -637,6 +657,7 @@ export default function Home() {
     setNavOpen(false);
     if (view !== "store") {
       setView("store");
+      if (window.location.pathname !== "/") window.history.pushState(null, "", "/");
       window.setTimeout(() => document.getElementById(id)?.scrollIntoView({ behavior }), 120);
     } else {
       document.getElementById(id)?.scrollIntoView({ behavior });
@@ -1054,7 +1075,7 @@ export default function Home() {
         </aside>
       )}
 
-      {accountOpen && <AccountDialog user={sessionUser} onSession={handleSession} onClose={() => { setAccountOpen(false); setResumeCheckout(false); }} settings={settings} />}
+      {accountOpen && <AccountDialog user={sessionUser} onSession={handleSession} onClose={() => { setAccountOpen(false); setResumeCheckout(false); if (window.location.pathname.startsWith("/account")) window.history.pushState(null, "", "/"); }} settings={settings} />}
       {bundleOpen && activeBundle && <BundleBuilder bundle={activeBundle} products={products.map((product) => ({ ...product, stock: inventory[product.id] || 0 }))} onClose={() => setBundleOpen(false)} onAdd={(productIds, selections) => { if (!productIds.length) return; productIds.forEach((id) => { const product = products.find((item) => item.id === id); if (product) addToCart(product); }); setBundleSelection({ bundleId: activeBundle.id, selections }); setBundleOpen(false); setCartOpen(true); }} />}
 
       {toast && <div className="toast" role="status"><CheckCircle2 size={18} />{toast}</div>}
