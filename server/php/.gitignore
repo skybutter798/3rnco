@@ -1,0 +1,9 @@
+.env
+runtime/*.sqlite
+runtime/*.sqlite-*
+var/*.sqlite
+var/*.sqlite-*
+var/uploads/*
+var/backups/*
+!var/uploads/.gitkeep
+!var/backups/.gitkeep

@@ -1,0 +1,27 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1786121996692,
+      "tag": "0000_rare_kabuki",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1786122820220,
+      "tag": "0001_regular_lionheart",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1786200000000,
+      "tag": "0002_atomic_commerce",
+      "breakpoints": true
+    }
+  ]
+}
