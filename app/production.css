@@ -385,6 +385,18 @@
 .admin-control-grid button > em { overflow: hidden; color: #746d63; font-size: 9px; font-style: normal; text-overflow: ellipsis; white-space: nowrap; }
 .admin-control-grid button > svg { position: absolute; top: 16px; right: 16px; color: #92897c; }
 .admin-orders-table > div { grid-template-columns: 1.05fr 1.35fr 1.7fr 0.8fr 0.9fr 1.05fr; }
+.admin-orders-table select {
+  width: 100%;
+  min-width: 132px;
+  height: 36px;
+  padding: 0 28px 0 10px;
+  border-color: rgba(28, 37, 29, 0.24);
+  background: #fff;
+  color: #111;
+  font-size: 9px;
+  font-weight: 700;
+}
+.admin-orders-table select option { background: #fff; color: #111; }
 .receipt-review { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
 .receipt-review a, .receipt-review button { padding: 5px 7px; border: 1px solid var(--line); background: white; color: var(--ink); font-size: 8px; font-weight: 800; text-decoration: none; text-transform: uppercase; }
 .receipt-review button:first-of-type { background: var(--olive); color: white; }
@@ -516,9 +528,36 @@
 @media (max-width: 560px) {
   .store-api-alert { top: 38px; align-items: flex-start; font-size: 10px; }
   .store-api-alert a { display: none; }
-  .account-home > header { display: block; }
-  .account-home > header > button { margin-top: 8px; }
+  .account-overlay { padding: 0; }
+  .account-dialog { width: 100%; height: 100dvh; max-height: 100dvh; border-radius: 0; }
+  .account-dialog__close { top: 10px; right: 10px; width: 36px; height: 36px; }
+  .account-home { max-height: 100dvh; padding: 50px 16px 26px; }
+  .account-home > header { display: flex; align-items: center; gap: 12px; }
+  .account-home > header > div { min-width: 0; }
+  .account-home > header .eyebrow { margin-bottom: 2px; font-size: 7px; }
+  .account-home > header h2 { margin: 0; font-size: 28px; line-height: 1; }
+  .account-home > header p:last-child { overflow: hidden; margin: 5px 0 0; color: rgba(28,37,29,.54); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+  .account-home > header > button { flex: 0 0 auto; margin: 0 40px 0 auto; padding: 7px 0; font-size: 9px; }
+  .account-home > nav { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; margin: 16px 0; padding: 3px; border: 1px solid rgba(28,37,29,.08); border-radius: 9px; background: var(--cream); }
+  .account-home > nav button { justify-content: center; gap: 5px; min-width: 0; padding: 9px 5px; border-radius: 6px; font-size: 9px; }
+  .account-home > nav button.is-active { border: 0; background: #fff; box-shadow: 0 2px 8px rgba(28,37,29,.07); }
+  .account-home > nav svg { width: 14px; }
   .account-panel__heading { align-items: stretch; flex-direction: column; }
+  .account-form--profile .account-panel__heading { align-items: center; flex-direction: row; gap: 10px; margin-bottom: 14px; }
+  .account-form--profile .account-panel__heading > div { min-width: 0; }
+  .account-form--profile .account-panel__heading h3 { font-size: 24px; }
+  .account-form--profile .account-panel__heading .button { min-height: 36px; margin-left: auto; padding: 8px 11px; font-size: 9px; white-space: nowrap; }
+  .account-form--profile .form-grid { gap: 11px; }
+  .account-form--profile .form-grid label { gap: 5px; font-size: 8px; }
+  .account-form--profile .form-grid input { height: 43px; min-height: 43px; padding: 0 11px; font-size: 12px; }
+  .account-form--profile .check-field { padding: 4px 0; font-size: 10px; line-height: 1.35; }
+  .customer-password { margin-top: 15px; padding: 13px; }
+  .customer-password > div { grid-template-columns: 32px 1fr auto; gap: 9px; }
+  .customer-password > div > span { width: 32px; height: 32px; }
+  .customer-password h3 { font-size: 19px; }
+  .customer-password p { font-size: 9px; line-height: 1.4; }
+  .customer-password > div > button { grid-column: auto; justify-self: auto; padding: 7px 8px; font-size: 9px; }
+  .customer-password .account-form { margin-top: 13px; padding-top: 13px; }
   .account-order-card > summary { grid-template-columns: 1fr auto; }
   .account-order-card > summary em { grid-column: 1 / -1; justify-self: start; }
   .payment-destination { grid-template-columns: 1fr; }
