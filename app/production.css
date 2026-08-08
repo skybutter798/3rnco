@@ -339,11 +339,33 @@
 .dashboard-live-grid button { display: grid; width: 100%; grid-template-columns: 1fr auto auto; gap: 15px; padding: 12px 0; border-top: 1px solid rgba(45, 40, 36, 0.08); background: transparent; text-align: left; }
 .dashboard-live-grid > article:last-child strong { display: block; margin-top: 12px; font-family: var(--font-display); font-size: 35px; font-weight: 400; }
 .dashboard-live-grid > article:last-child p { margin: -7px 0 12px; color: #746d63; font-size: 10px; }
+.admin-control-panel { margin-top: 16px; padding: 24px; border: 1px solid rgba(45, 40, 36, 0.1); background: white; }
+.admin-control-panel__heading { display: flex; align-items: end; justify-content: space-between; gap: 24px; }
+.admin-control-panel__heading h2 { margin: 5px 0 0; font-family: var(--font-display); font-size: 30px; font-weight: 400; }
+.admin-control-panel__heading > p { margin: 0; color: #746d63; font-size: 11px; }
+.admin-control-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-top: 18px; }
+.admin-control-grid button { position: relative; display: grid; min-width: 0; gap: 5px; padding: 16px; border: 1px solid rgba(45, 40, 36, 0.1); background: #faf8f3; color: #2d2924; text-align: left; transition: border-color 0.2s ease, background 0.2s ease, transform 0.2s ease; }
+.admin-control-grid button:hover { transform: translateY(-2px); border-color: rgba(49, 90, 59, 0.35); background: #f6f4ed; }
+.admin-control-grid button > span { display: grid; width: 33px; height: 33px; margin-bottom: 5px; place-items: center; border-radius: 50%; background: rgba(49, 90, 59, 0.1); color: var(--olive); }
+.admin-control-grid button > small { overflow: hidden; color: #797164; font-size: 9px; font-weight: 700; letter-spacing: 0.08em; text-overflow: ellipsis; text-transform: uppercase; white-space: nowrap; }
+.admin-control-grid button > strong { overflow: hidden; font-family: var(--font-display); font-size: 21px; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
+.admin-control-grid button > em { overflow: hidden; color: #746d63; font-size: 9px; font-style: normal; text-overflow: ellipsis; white-space: nowrap; }
+.admin-control-grid button > svg { position: absolute; top: 16px; right: 16px; color: #92897c; }
 .admin-orders-table > div { grid-template-columns: 1.05fr 1.35fr 1.7fr 0.8fr 0.9fr 1.05fr; }
 
 .settings-production { display: grid; gap: 18px; }
 .settings-production > section { padding: 24px; border: 1px solid rgba(45, 40, 36, 0.1); background: white; }
 .settings-production h2 { margin: 0 0 20px; font-family: var(--font-display); font-size: 29px; font-weight: 400; }
+.settings-section-heading { display: flex; align-items: start; justify-content: space-between; gap: 20px; }
+.settings-section-heading h2 { margin: 4px 0 0; }
+.settings-section-heading > span { color: rgba(242, 232, 216, 0.72); font-size: 10px; }
+.settings-section-copy { max-width: 620px; margin: 10px 0 18px; color: rgba(242, 232, 216, 0.76); font-size: 11px; line-height: 1.6; }
+.settings-production > .top-note-editor { border-color: rgba(242, 232, 216, 0.14); background: var(--ink); color: var(--cream); }
+.top-note-editor .eyebrow { color: #d6a38e; }
+.top-note-editor > label { color: rgba(242, 232, 216, 0.78); }
+.top-note-editor > label input { border-color: rgba(242, 232, 216, 0.22); background: rgba(255, 255, 255, 0.08); color: var(--cream); }
+.top-note-editor > label input:focus { border-color: #d6a38e; background: rgba(255, 255, 255, 0.12); }
+.top-note-editor__preview { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 34px; margin-top: 16px; padding: 7px 14px; border: 1px solid rgba(242, 232, 216, 0.18); background: #18231c; color: var(--cream); font-size: 9px; letter-spacing: 0.08em; text-align: center; text-transform: uppercase; }
 .locked-help { display: flex; align-items: center; gap: 7px; margin: 0; color: #8a3f2e; font-size: 11px; }
 .password-change { display: grid; grid-template-columns: 0.85fr 1.15fr; gap: 30px; margin-bottom: 22px; padding: 28px; border: 1px solid rgba(138, 63, 46, 0.2); background: #f4e9dc; }
 .password-change > div { display: flex; align-items: flex-start; gap: 14px; }
@@ -396,6 +418,7 @@
   .account-dialog__art > div { right: 24px; left: 24px; }
   .bundle-steps fieldset > div { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .admin-topbar > div:last-child .admin-search { display: none; }
+  .admin-control-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (max-width: 800px) {
@@ -446,6 +469,9 @@
   .password-change > div { display: block; }
   .password-change > div > span { margin-bottom: 12px; }
   .settings-production > section { padding: 17px; }
+  .admin-control-panel { padding: 17px; }
+  .admin-control-panel__heading { align-items: flex-start; flex-direction: column; gap: 6px; }
+  .admin-control-grid { grid-template-columns: 1fr; }
   .bundle-admin__intro { grid-template-columns: 1fr; padding: 16px; }
   .bundle-admin__intro > label:nth-child(3) { grid-column: auto; }
   .editor-media-grid { grid-template-columns: 1fr; }

@@ -48,7 +48,7 @@ test("server-renders the current 3R&Co storefront", async () => {
 });
 
 test("includes persistent production commerce and clean seed contracts", async () => {
-  const [page, account, admin, bundle, api, layout, css, packageJson, phpSeeder, mysqlSchema] = await Promise.all([
+  const [page, account, admin, bundle, api, layout, css, productionCss, packageJson, phpSeeder, mysqlSchema] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/components/AccountDialog.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/components/AdminDashboard.tsx", import.meta.url), "utf8"),
@@ -56,6 +56,7 @@ test("includes persistent production commerce and clean seed contracts", async (
     readFile(new URL("../app/lib/api.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+    readFile(new URL("../app/production.css", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
     readFile(new URL("../server/php/src/Seeder.php", import.meta.url), "utf8"),
     readFile(new URL("../server/php/database/migrations/mysql/001_schema.sql", import.meta.url), "utf8"),
@@ -79,6 +80,9 @@ test("includes persistent production commerce and clean seed contracts", async (
   assert.match(account, /\/profile\/addresses/);
   assert.match(admin, /Build the two-step set/);
   assert.match(admin, /Store Settings/);
+  assert.match(admin, /Top announcement/);
+  assert.match(admin, /top-note-editor__preview/);
+  assert.match(admin, /Storefront controls/);
   assert.match(admin, /Change password & unlock/);
   assert.match(admin, /expectedStock/);
   assert.match(admin, /INVENTORY_CHANGED/);
@@ -103,6 +107,8 @@ test("includes persistent production commerce and clean seed contracts", async (
   assert.match(layout, /structuredData/);
   assert.match(css, /prefers-reduced-motion:\s*reduce/);
   assert.match(css, /@media \(max-width: 700px\)/);
+  assert.match(css, /\.site-header--solid\s*\{[^}]*top:\s*0;/s);
+  assert.match(productionCss, /\.admin-control-grid/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
   assert.match(packageJson, /cross-env WRANGLER_LOG_PATH/);
 });

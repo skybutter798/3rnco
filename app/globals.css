@@ -176,10 +176,11 @@ button:disabled {
   align-items: center;
   padding: 0 clamp(22px, 4.5vw, 70px);
   border-bottom: 1px solid transparent;
-  transition: height 0.35s ease, background 0.35s ease, border-color 0.35s ease, color 0.35s ease, backdrop-filter 0.35s ease;
+  transition: top 0.35s ease, height 0.35s ease, background 0.35s ease, border-color 0.35s ease, color 0.35s ease, backdrop-filter 0.35s ease;
 }
 
 .site-header--solid {
+  top: 0;
   height: 74px;
   border-color: rgba(23, 59, 41, 0.1);
   background: rgba(242, 232, 216, 0.92);
