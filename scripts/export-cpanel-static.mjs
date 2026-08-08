@@ -41,16 +41,16 @@ if (!html.includes("3R&amp;Co.") || !html.includes("/_next/static/")) {
   throw new Error("Static export did not contain the expected storefront markup and assets");
 }
 
-const assetPattern = /\/_next\/static\/[^\\\s"'<>?]+/g;
-const assetPaths = [...new Set(html.match(assetPattern) ?? [])];
-const assetVersions = new Map();
+const cssPattern = /\/_next\/static\/css\/[^\\\s"'<>?]+\.css/g;
+const cssPaths = [...new Set(html.match(cssPattern) ?? [])];
+const cssVersions = new Map();
 
-for (const assetPath of assetPaths) {
-  const asset = await readFile(path.join(outputDirectory, assetPath.slice(1)));
-  assetVersions.set(assetPath, createHash("sha256").update(asset).digest("hex").slice(0, 12));
+for (const cssPath of cssPaths) {
+  const css = await readFile(path.join(outputDirectory, cssPath.slice(1)));
+  cssVersions.set(cssPath, createHash("sha256").update(css).digest("hex").slice(0, 12));
 }
 
-const versionedHtml = html.replace(assetPattern, (assetPath) => `${assetPath}?v=${assetVersions.get(assetPath)}`);
+const versionedHtml = html.replace(cssPattern, (cssPath) => `${cssPath}?v=${cssVersions.get(cssPath)}`);
 
 await writeFile(path.join(outputDirectory, "index.html"), versionedHtml, "utf8");
 console.log(`Exported ${versionedHtml.length} bytes to ${outputDirectory}`);
