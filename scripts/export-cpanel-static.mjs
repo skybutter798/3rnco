@@ -1,4 +1,5 @@
-import { cp, mkdir, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { cp, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -40,5 +41,16 @@ if (!html.includes("3R&amp;Co.") || !html.includes("/_next/static/")) {
   throw new Error("Static export did not contain the expected storefront markup and assets");
 }
 
-await writeFile(path.join(outputDirectory, "index.html"), html, "utf8");
-console.log(`Exported ${html.length} bytes to ${outputDirectory}`);
+const assetPattern = /\/_next\/static\/[^\\\s"'<>?]+/g;
+const assetPaths = [...new Set(html.match(assetPattern) ?? [])];
+const assetVersions = new Map();
+
+for (const assetPath of assetPaths) {
+  const asset = await readFile(path.join(outputDirectory, assetPath.slice(1)));
+  assetVersions.set(assetPath, createHash("sha256").update(asset).digest("hex").slice(0, 12));
+}
+
+const versionedHtml = html.replace(assetPattern, (assetPath) => `${assetPath}?v=${assetVersions.get(assetPath)}`);
+
+await writeFile(path.join(outputDirectory, "index.html"), versionedHtml, "utf8");
+console.log(`Exported ${versionedHtml.length} bytes to ${outputDirectory}`);
