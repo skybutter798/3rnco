@@ -585,3 +585,47 @@ export const idempotencyKeys = sqliteTable("idempotency_keys", {
   expiresAt: integer("expires_at").notNull(),
   createdAt: integer("created_at").notNull().default(sql`(unixepoch())`),
 }, (table) => [index("idx_idempotency_expiry").on(table.expiresAt)]);
+
+export const staffProfiles = sqliteTable("staff_profiles", {
+  userId: text("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  displayName: text("display_name").notNull(),
+  permissionsJson: text("permissions_json").notNull().default("[]"),
+  createdBy: text("created_by").references(() => users.id, { onDelete: "set null" }),
+  ...timestamps,
+});
+
+export const paymentMethods = sqliteTable("payment_methods", {
+  id: text("id").primaryKey(),
+  methodType: text("method_type").notNull(),
+  displayName: text("display_name").notNull(),
+  enabled: integer("enabled", { mode: "boolean" }).notNull().default(false),
+  instructions: text("instructions"),
+  qrImageUrl: text("qr_image_url"),
+  bankName: text("bank_name"),
+  accountName: text("account_name"),
+  accountNumber: text("account_number"),
+  sortOrder: integer("sort_order").notNull().default(0),
+  ...timestamps,
+}, (table) => [index("idx_payment_methods_enabled_sort").on(table.enabled, table.sortOrder)]);
+
+export const paymentReceipts = sqliteTable("payment_receipts", {
+  id: text("id").primaryKey(),
+  orderId: text("order_id").notNull().references(() => orders.id, { onDelete: "cascade" }),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  paymentMethodId: text("payment_method_id").notNull().references(() => paymentMethods.id, { onDelete: "restrict" }),
+  storageKey: text("storage_key").notNull(),
+  originalName: text("original_name").notNull(),
+  mimeType: text("mime_type").notNull(),
+  sizeBytes: integer("size_bytes").notNull(),
+  sha256: text("sha256").notNull(),
+  customerReference: text("customer_reference"),
+  customerNote: text("customer_note"),
+  status: text("status").notNull().default("SUBMITTED"),
+  reviewNote: text("review_note"),
+  reviewedBy: text("reviewed_by").references(() => users.id, { onDelete: "set null" }),
+  reviewedAt: integer("reviewed_at"),
+  ...timestamps,
+}, (table) => [
+  index("idx_payment_receipts_order_status").on(table.orderId, table.status, table.createdAt),
+  index("idx_payment_receipts_user").on(table.userId, table.createdAt),
+]);

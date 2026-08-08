@@ -23,12 +23,13 @@ final class App
         $store = new StoreRepository($database);
         $orders = new OrderService($database, $store, $config);
         $uploads = new UploadService($config, $database);
+        $receipts = new PaymentReceiptService($config, $database);
 
         $storeController = new StoreController($store, $database);
         $authController = new AuthController($this->auth, $this->rateLimiter, $audit);
-        $accountController = new AccountController($database, $this->auth, $orders, $audit);
+        $accountController = new AccountController($database, $this->auth, $orders, $receipts, $audit);
         $publicController = new PublicController($database, $orders, $this->rateLimiter, $audit);
-        $adminController = new AdminController($database, $store, $orders, $uploads, $this->auth, $audit);
+        $adminController = new AdminController($database, $store, $orders, $uploads, $receipts, $this->auth, $audit);
 
         $this->routes($storeController, $authController, $accountController, $publicController, $adminController);
     }
@@ -69,8 +70,14 @@ final class App
                 if ($requiredRole === 'admin' && $context->role() !== 'admin') {
                     throw new ApiException('ADMIN_ACCESS_REQUIRED', 'Administrator access is required.', 403);
                 }
+                if ($requiredRole === 'backoffice' && !$context->isBackoffice()) {
+                    throw new ApiException('STAFF_ACCESS_REQUIRED', 'Staff access is required.', 403);
+                }
+                if (isset($options['permission']) && !$context->can((string) $options['permission'])) {
+                    throw new ApiException('STAFF_PERMISSION_REQUIRED', 'Your staff account does not have access to this area.', 403);
+                }
             }
-            if (($requiredRole ?? null) === 'admin' && $context?->mustChangePassword() && !($options['allowMustChange'] ?? false)) {
+            if (in_array(($requiredRole ?? null), ['admin', 'backoffice'], true) && $context?->mustChangePassword() && !($options['allowMustChange'] ?? false)) {
                 throw new ApiException('PASSWORD_CHANGE_REQUIRED', 'Change the temporary administrator password before using this area.', 403);
             }
             if (($options['csrf'] ?? false) === true) {
@@ -124,9 +131,17 @@ final class App
         $this->router->add('POST', '/api/v1/enquiries', [$public, 'enquiry'], ['csrf' => true, 'rate' => ['bucket' => 'enquiry-create', 'limit' => 8, 'window' => 3600]]);
         $this->router->add('POST', '/api/v1/newsletter', [$public, 'newsletter'], ['csrf' => true, 'rate' => ['bucket' => 'newsletter', 'limit' => 8, 'window' => 3600]]);
 
-        $this->router->add('GET', '/api/v1/admin/settings', [$admin, 'settings'], ['auth' => 'admin', 'allowMustChange' => true]);
+        $this->router->add('GET', '/api/v1/admin/settings', [$admin, 'settings'], ['auth' => 'backoffice', 'allowMustChange' => true]);
         $this->router->add('PATCH', '/api/v1/admin/settings', [$admin, 'updateSettings'], ['auth' => 'admin', 'csrf' => true]);
-        $this->router->add('GET', '/api/v1/admin/dashboard', [$admin, 'dashboard'], ['auth' => 'admin']);
+        $this->router->add('GET', '/api/v1/admin/dashboard', [$admin, 'dashboard'], ['auth' => 'backoffice', 'permission' => 'dashboard']);
+
+        $this->router->add('GET', '/api/v1/admin/staff', [$admin, 'staff'], ['auth' => 'admin']);
+        $this->router->add('POST', '/api/v1/admin/staff', [$admin, 'createStaff'], ['auth' => 'admin', 'csrf' => true]);
+        $this->router->add('PATCH', '/api/v1/admin/staff/{id}', [$admin, 'updateStaff'], ['auth' => 'admin', 'csrf' => true]);
+        $this->router->add('GET', '/api/v1/admin/payment-receipts/{id}/file', [$admin, 'paymentReceiptFile'], ['auth' => 'backoffice', 'permission' => 'orders']);
+        $this->router->add('PATCH', '/api/v1/admin/payment-receipts/{id}', [$admin, 'reviewPaymentReceipt'], ['auth' => 'backoffice', 'permission' => 'orders', 'csrf' => true]);
+
+        $this->router->add('POST', '/api/v1/orders/{id}/receipt', [$account, 'uploadPaymentReceipt'], ['auth' => 'customer', 'csrf' => true, 'rate' => ['bucket' => 'payment-receipt', 'limit' => 10, 'window' => 3600]]);
 
         $this->resource('/api/v1/admin/products', $admin, 'products', 'product', 'createProduct', 'updateProduct', 'deleteProduct');
         $this->resource('/api/v1/admin/slides', $admin, 'slides', 'product', 'createSlide', 'updateSlide', 'deleteSlide', 'slide');
@@ -135,21 +150,27 @@ final class App
         $this->resource('/api/v1/admin/orders', $admin, 'orders', 'order', null, 'updateOrder', 'deleteOrder');
         $this->resource('/api/v1/admin/customers', $admin, 'customers', 'customer', 'createCustomer', 'updateCustomer', 'deleteCustomer');
         $this->resource('/api/v1/admin/enquiries', $admin, 'enquiries', 'enquiry', null, 'updateEnquiry', 'deleteEnquiry');
-        $this->router->add('POST', '/api/v1/admin/enquiries/{id}/replies', [$admin, 'replyEnquiry'], ['auth' => 'admin', 'csrf' => true]);
-        $this->router->add('GET', '/api/v1/admin/uploads', [$admin, 'uploads'], ['auth' => 'admin']);
-        $this->router->add('POST', '/api/v1/admin/uploads', [$admin, 'createUpload'], ['auth' => 'admin', 'csrf' => true, 'rate' => ['bucket' => 'admin-upload', 'limit' => 30, 'window' => 3600]]);
-        $this->router->add('DELETE', '/api/v1/admin/uploads/{id}', [$admin, 'deleteUpload'], ['auth' => 'admin', 'csrf' => true]);
+        $this->router->add('POST', '/api/v1/admin/enquiries/{id}/replies', [$admin, 'replyEnquiry'], ['auth' => 'backoffice', 'permission' => 'enquiries', 'csrf' => true]);
+        $this->router->add('GET', '/api/v1/admin/uploads', [$admin, 'uploads'], ['auth' => 'backoffice', 'permission' => 'content']);
+        $this->router->add('POST', '/api/v1/admin/uploads', [$admin, 'createUpload'], ['auth' => 'backoffice', 'permission' => 'content', 'csrf' => true, 'rate' => ['bucket' => 'admin-upload', 'limit' => 30, 'window' => 3600]]);
+        $this->router->add('DELETE', '/api/v1/admin/uploads/{id}', [$admin, 'deleteUpload'], ['auth' => 'backoffice', 'permission' => 'content', 'csrf' => true]);
         $this->router->add('GET', '/api/v1/admin/audit-logs', [$admin, 'auditLogs'], ['auth' => 'admin']);
     }
 
     private function resource(string $base, AdminController $controller, string $list, string $show, ?string $create, string $update, string $delete, ?string $showOverride = null): void
     {
-        $this->router->add('GET', $base, [$controller, $list], ['auth' => 'admin']);
-        $this->router->add('GET', $base . '/{id}', [$controller, $showOverride ?? $show], ['auth' => 'admin']);
+        $permission = match (true) {
+            str_contains($base, '/orders') => 'orders', str_contains($base, '/customers') => 'customers',
+            str_contains($base, '/enquiries') => 'enquiries', str_contains($base, '/promos') => 'promos',
+            default => 'content',
+        };
+        $options = ['auth' => 'backoffice', 'permission' => $permission];
+        $this->router->add('GET', $base, [$controller, $list], $options);
+        $this->router->add('GET', $base . '/{id}', [$controller, $showOverride ?? $show], $options);
         if ($create !== null) {
-            $this->router->add('POST', $base, [$controller, $create], ['auth' => 'admin', 'csrf' => true]);
+            $this->router->add('POST', $base, [$controller, $create], $options + ['csrf' => true]);
         }
-        $this->router->add('PATCH', $base . '/{id}', [$controller, $update], ['auth' => 'admin', 'csrf' => true]);
-        $this->router->add('DELETE', $base . '/{id}', [$controller, $delete], ['auth' => 'admin', 'csrf' => true]);
+        $this->router->add('PATCH', $base . '/{id}', [$controller, $update], $options + ['csrf' => true]);
+        $this->router->add('DELETE', $base . '/{id}', [$controller, $delete], $options + ['csrf' => true]);
     }
 }

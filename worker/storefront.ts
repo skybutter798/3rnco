@@ -195,7 +195,7 @@ export async function loadBundles(db: D1Database, includeInactive = false) {
 }
 
 export async function storefrontPayload(db: D1Database) {
-  const [settingsRow, socials, products, slides, gallery, bundles, sections] =
+  const [settingsRow, socials, products, slides, paymentMethods, gallery, bundles, sections] =
     await Promise.all([
       db
         .prepare(
@@ -239,6 +239,11 @@ export async function storefrontPayload(db: D1Database) {
       id, image_url AS image, eyebrow, title, emphasis, copy, caption, tone,
       position, enabled AS active, sort_order AS sortOrder
       FROM slides WHERE enabled = 1 ORDER BY sort_order`),
+      ),
+      allRows<{ id: string; type: string; name: string; active: number; instructions: string | null; qrImage: string | null; bankName: string | null; accountName: string | null; accountNumber: string | null; sortOrder: number }>(
+        db.prepare(`SELECT id, method_type AS type, display_name AS name, enabled AS active,
+          instructions, qr_image_url AS qrImage, bank_name AS bankName, account_name AS accountName,
+          account_number AS accountNumber, sort_order AS sortOrder FROM payment_methods ORDER BY sort_order, id`),
       ),
       allRows<{
         id: string;
@@ -293,6 +298,7 @@ export async function storefrontPayload(db: D1Database) {
       shippingFee: settingsRow.shippingFeeMinor / 100,
       currency: settingsRow.currency,
       country: settingsRow.country,
+      paymentMethods: paymentMethods.map((method) => ({ ...method, active: Boolean(method.active) })),
     },
     products,
     slides: slides.map((slide) => ({
@@ -301,6 +307,7 @@ export async function storefrontPayload(db: D1Database) {
     })),
     gallery: gallery.map((item) => ({ ...item, active: Boolean(item.active) })),
     bundles,
+    paymentMethods: paymentMethods.filter((method) => method.active).map((method) => ({ ...method, active: true })),
     sections,
   };
 }

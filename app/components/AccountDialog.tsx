@@ -3,6 +3,7 @@
 import {
   ArrowRight,
   Check,
+  CreditCard,
   Eye,
   EyeOff,
   Leaf,
@@ -14,6 +15,7 @@ import {
   Save,
   ShieldCheck,
   Trash2,
+  Upload,
   UserRound,
   X,
 } from "lucide-react";
@@ -26,6 +28,7 @@ import type {
   CustomerProfile,
   StoreOrder,
   StoreSettings,
+  PaymentMethod,
 } from "../store-types";
 
 type Props = {
@@ -841,32 +844,12 @@ export default function AccountDialog({
                     ) : (
                       <div className="account-orders">
                         {sortedOrders.map((order) => (
-                          <article key={order.id}>
-                            <div>
-                              <span>{order.orderNumber || order.id}</span>
-                              <time>
-                                {new Date(order.createdAt).toLocaleDateString(
-                                  "en-MY",
-                                  {
-                                    day: "numeric",
-                                    month: "short",
-                                    year: "numeric",
-                                  },
-                                )}
-                              </time>
-                            </div>
-                            <p>
-                              {order.lines
-                                ?.map(
-                                  (line) => `${line.name} ×${line.quantity}`,
-                                )
-                                .join(", ") ||
-                                order.items ||
-                                "3R&Co ritual"}
-                            </p>
-                            <strong>RM{Number(order.total).toFixed(2)}</strong>
-                            <b>{order.status}</b>
-                          </article>
+                          <PaymentOrderCard
+                            key={order.id}
+                            order={order}
+                            methods={(settings.paymentMethods || []).filter((method) => method.active)}
+                            onUpdated={(updated) => setOrders((current) => current.map((item) => item.id === updated.id ? updated : item))}
+                          />
                         ))}
                       </div>
                     )}
@@ -881,6 +864,67 @@ export default function AccountDialog({
         </a>
       </section>
     </div>
+  );
+}
+
+function PaymentOrderCard({ order, methods, onUpdated }: { order: StoreOrder; methods: PaymentMethod[]; onUpdated: (order: StoreOrder) => void }) {
+  const pending = order.status === "pending_payment" && (order.paymentStatus || "pending") === "pending";
+  const [methodId, setMethodId] = useState(methods[0]?.id || "");
+  const [reference, setReference] = useState("");
+  const [note, setNote] = useState("");
+  const [file, setFile] = useState<File | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const method = methods.find((item) => item.id === methodId);
+  const receipt = order.paymentReceipt;
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!file || !methodId) return setError("Choose a payment method and receipt file.");
+    setBusy(true); setError(""); setNotice("");
+    const form = new FormData();
+    form.append("file", file); form.append("paymentMethodId", methodId);
+    if (reference) form.append("customerReference", reference);
+    if (note) form.append("customerNote", note);
+    try {
+      const result = await apiRequest<{ order?: StoreOrder; receipt?: StoreOrder["paymentReceipt"] }>(`/orders/${encodeURIComponent(order.id)}/receipt`, { method: "POST", body: form });
+      if (result.order) onUpdated(result.order);
+      else if (result.receipt) onUpdated({ ...order, paymentReceipt: result.receipt });
+      setNotice("Receipt submitted. Our team will verify it before confirming your order.");
+    } catch (reason) { setError(errorMessage(reason)); } finally { setBusy(false); }
+  };
+  return (
+    <details className="account-order-card" open={pending}>
+      <summary>
+        <span><b>{order.orderNumber || order.id}</b><time>{new Date(order.createdAt).toLocaleDateString("en-MY", { day: "numeric", month: "short", year: "numeric" })}</time></span>
+        <strong>RM{Number(order.total).toFixed(2)}</strong>
+        <em className={`status-badge status-badge--${order.status.replaceAll("_", "-")}`}>{order.status.replaceAll("_", " ")}</em>
+      </summary>
+      <div className="account-order-detail">
+        <div className="account-order-lines">
+          {(order.lines || []).map((line) => <p key={line.id || `${line.productId}-${line.name}`}><span>{line.name} × {line.quantity}</span><b>RM{(line.unitPrice * line.quantity).toFixed(2)}</b></p>)}
+          <p><span>Subtotal</span><b>RM{Number(order.subtotal ?? order.total).toFixed(2)}</b></p>
+          {!!order.discount && <p><span>Saving</span><b>−RM{Number(order.discount).toFixed(2)}</b></p>}
+          <p><span>Delivery</span><b>{order.shipping ? `RM${Number(order.shipping).toFixed(2)}` : "Complimentary"}</b></p>
+        </div>
+        {receipt && <div className={`receipt-state receipt-state--${receipt.status}`}><ShieldCheck /><div><b>{receipt.status === "verified" ? "Payment verified" : receipt.status === "rejected" ? "Receipt needs attention" : "Receipt under review"}</b><p>{receipt.reviewNote || `${receipt.originalName} · ${receipt.paymentMethodName || "manual payment"}`}</p></div></div>}
+        {pending && (!receipt || receipt.status === "rejected") && (
+          <form className="manual-payment" onSubmit={submit}>
+            <div className="manual-payment__heading"><CreditCard /><div><b>Complete manual payment</b><p>Choose where to pay, then upload your receipt here. We verify every payment manually.</p></div></div>
+            {!methods.length ? <p className="form-alert">Payment destinations are being prepared. Please contact support before transferring.</p> : <>
+              <div className="payment-method-tabs">{methods.map((item) => <button type="button" className={item.id === methodId ? "is-selected" : ""} onClick={() => setMethodId(item.id)} key={item.id}>{item.name}</button>)}</div>
+              {method && <div className="payment-destination">
+                {method.qrImage && <img src={method.qrImage} alt={`${method.name} payment QR`} />}
+                <div><h4>{method.name}</h4>{method.bankName && <p>{method.bankName}</p>}{method.accountName && <p>Account name: <b>{method.accountName}</b></p>}{method.accountNumber && <p>Account number: <b>{method.accountNumber}</b> <button type="button" onClick={() => void navigator.clipboard?.writeText(method.accountNumber || "")}>Copy</button></p>}<small>{method.instructions}</small></div>
+              </div>}
+              <div className="form-grid"><label>Payment reference (optional)<input value={reference} maxLength={160} onChange={(event) => setReference(event.target.value)} placeholder="Bank reference or sender name" /></label><label>Short note (optional)<input value={note} maxLength={1000} onChange={(event) => setNote(event.target.value)} placeholder="Anything our team should know" /></label><label className="full receipt-upload"><Upload /><span>{file ? file.name : "Choose receipt image or PDF"}<small>JPEG, PNG, WebP or PDF · up to 8 MB</small></span><input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" onChange={(event) => setFile(event.target.files?.[0] || null)} required /></label></div>
+              {error && <p className="form-alert" role="alert">{error}</p>}{notice && <p className="form-success" role="status">{notice}</p>}
+              <button className="button button--dark" disabled={busy || !file}>{busy ? "Uploading…" : "Submit receipt for verification"}</button>
+            </>}
+          </form>
+        )}
+      </div>
+    </details>
   );
 }
 

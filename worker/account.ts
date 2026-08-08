@@ -191,6 +191,16 @@ export async function handleAccountOrders(request: Request, db: D1Database): Pro
     oi.name_snapshot AS name, oi.quantity, oi.unit_price_minor AS unitPriceMinor,
     (SELECT image_url FROM product_media WHERE product_id = oi.product_id AND usage = 'PACKSHOT' ORDER BY sort_order LIMIT 1) AS image
     FROM order_items oi JOIN orders o ON o.id = oi.order_id WHERE o.user_id = ? ORDER BY oi.order_id`).bind(session.user.id)) : [];
+  const receipts = orders.length ? await allRows<{
+    id: string; orderId: string; status: string; paymentMethodId: string; paymentMethodName: string;
+    customerReference: string | null; customerNote: string | null; originalName: string; mimeType: string;
+    sizeBytes: number; reviewNote: string | null; createdAt: number; reviewedAt: number | null;
+  }>(db.prepare(`SELECT r.id, r.order_id AS orderId, r.status, r.payment_method_id AS paymentMethodId,
+    m.display_name AS paymentMethodName, r.customer_reference AS customerReference, r.customer_note AS customerNote,
+    r.original_name AS originalName, r.mime_type AS mimeType, r.size_bytes AS sizeBytes,
+    r.review_note AS reviewNote, r.created_at AS createdAt, r.reviewed_at AS reviewedAt
+    FROM payment_receipts r JOIN payment_methods m ON m.id = r.payment_method_id
+    WHERE r.user_id = ? ORDER BY r.created_at DESC`).bind(session.user.id)) : [];
   return ok({ orders: orders.map((order) => ({
     id: order.id,
     orderNumber: order.orderNumber,
@@ -204,6 +214,10 @@ export async function handleAccountOrders(request: Request, db: D1Database): Pro
     subtotal: order.subtotalMinor / 100,
     shipping: order.shippingMinor / 100,
     discount: order.discountMinor / 100,
+    paymentReceipt: (() => {
+      const receipt = receipts.find((candidate) => candidate.orderId === order.id);
+      return receipt ? { ...receipt, status: receipt.status.toLowerCase(), createdAt: isoTime(receipt.createdAt), reviewedAt: receipt.reviewedAt ? isoTime(receipt.reviewedAt) : null } : null;
+    })(),
     lines: lines.filter((line) => line.orderId === order.id).map((line) => ({
       id: line.id,
       productId: line.productId,

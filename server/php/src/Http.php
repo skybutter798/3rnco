@@ -36,6 +36,7 @@ final class Request
         private readonly array $files = [],
         public readonly string $remoteAddress = '127.0.0.1',
         public readonly string $userAgent = 'test-agent',
+        private readonly array $form = [],
     ) {
     }
 
@@ -98,6 +99,7 @@ final class Request
             $_FILES,
             (string) ($_SERVER['REMOTE_ADDR'] ?? '0.0.0.0'),
             (string) ($headers['user-agent'] ?? ''),
+            $_POST,
         );
     }
 
@@ -124,7 +126,7 @@ final class Request
 
     public function input(string $name, mixed $default = null): mixed
     {
-        return ($this->json ?? [])[$name] ?? $default;
+        return ($this->json ?? [])[$name] ?? $this->form[$name] ?? $default;
     }
 
     /** @return array<string, mixed>|null */
@@ -142,6 +144,7 @@ final class Response
     public array $headers = [];
     /** @var list<array{name:string,value:string,options:array<string,mixed>}> */
     public array $cookies = [];
+    private ?string $rawBody = null;
 
     /** @param array<string, mixed>|null $body */
     public function __construct(
@@ -165,6 +168,18 @@ final class Response
     public static function empty(int $status = 204): self
     {
         return new self($status, null);
+    }
+
+    public static function file(string $bytes, string $contentType, string $filename): self
+    {
+        $response = new self(200, null);
+        $response->rawBody = $bytes;
+        $response->headers['Content-Type'] = $contentType;
+        $response->headers['Content-Disposition'] = "attachment; filename*=UTF-8''" . rawurlencode($filename);
+        $response->headers['Content-Length'] = (string) strlen($bytes);
+        $response->headers['Content-Security-Policy'] = "default-src 'none'; sandbox";
+
+        return $response;
     }
 
     /** @param array<string, mixed> $fields */
@@ -204,6 +219,8 @@ final class Response
         }
         if ($this->body !== null) {
             echo json_encode($this->body, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRESERVE_ZERO_FRACTION);
+        } elseif ($this->rawBody !== null) {
+            echo $this->rawBody;
         }
         exit;
     }

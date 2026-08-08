@@ -1,10 +1,11 @@
 import migrationSql from "../drizzle/0000_rare_kabuki.sql?raw";
 import authRateLimitMigration from "../drizzle/0001_regular_lionheart.sql?raw";
 import atomicCommerceMigration from "../drizzle/0002_atomic_commerce.sql?raw";
+import staffManualPaymentsMigration from "../drizzle/0003_staff_manual_payments.sql?raw";
 import atomicCommerceTriggers from "./atomic-commerce-triggers.sql?raw";
 import { seedProductionDatabase } from "./seed";
 
-const SCHEMA_VERSION = "3";
+const SCHEMA_VERSION = "4";
 const COMMERCE_TRIGGER_VERSION = "1";
 const RESERVATION_TTL_SECONDS = 24 * 60 * 60;
 const initializationByDatabase = new WeakMap<object, Promise<void>>();
@@ -27,7 +28,7 @@ function splitMigrationSql(...sources: string[]): string[] {
 }
 
 export function getMigrationStatements(): string[] {
-  return splitMigrationSql(migrationSql, authRateLimitMigration, atomicCommerceMigration);
+  return splitMigrationSql(migrationSql, authRateLimitMigration, atomicCommerceMigration, staffManualPaymentsMigration);
 }
 
 export function getTriggerStatements(): string[] {

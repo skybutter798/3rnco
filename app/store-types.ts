@@ -69,6 +69,47 @@ export type StoreSettings = {
   shippingFee: number;
   currency: string;
   country: string;
+  paymentMethods: PaymentMethod[];
+};
+
+export type PaymentMethod = {
+  id: string;
+  type: "duitnow_qr" | "tng_qr" | "bank_transfer";
+  name: string;
+  active: boolean;
+  instructions?: string | null;
+  qrImage?: string | null;
+  bankName?: string | null;
+  accountName?: string | null;
+  accountNumber?: string | null;
+  sortOrder?: number;
+};
+
+export type PaymentReceipt = {
+  id: string;
+  status: "submitted" | "verified" | "rejected" | string;
+  paymentMethodId: string;
+  paymentMethodName?: string;
+  customerReference?: string | null;
+  customerNote?: string | null;
+  originalName: string;
+  mimeType: string;
+  sizeBytes: number;
+  reviewNote?: string | null;
+  createdAt: string;
+  reviewedAt?: string | null;
+};
+
+export type StaffMember = {
+  id: string;
+  username: string;
+  email?: string | null;
+  fullName: string;
+  status: "active" | "disabled" | string;
+  permissions: string[];
+  mustChangePassword?: boolean;
+  lastLoginAt?: string | null;
+  createdAt?: string;
 };
 
 export type BundleStep = {
@@ -100,6 +141,7 @@ export type AuthUser = {
   phone?: string;
   role: "customer" | "admin" | "superadmin" | string;
   mustChangePassword?: boolean;
+  permissions?: string[];
 };
 
 export type AuthSession = { user: AuthUser | null; csrfToken?: string };
@@ -149,6 +191,7 @@ export type StoreOrder = {
   discount?: number;
   lines?: OrderLine[];
   items?: string;
+  paymentReceipt?: PaymentReceipt | null;
 };
 
 export type Promo = {
@@ -191,4 +234,5 @@ export type StorefrontPayload = {
   slides?: Slide[];
   gallery?: GalleryItem[];
   bundles?: Bundle[];
+  paymentMethods?: PaymentMethod[];
 };

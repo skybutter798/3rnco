@@ -5,6 +5,7 @@ import {
   handleRegister,
   handleSession,
 } from "./auth";
+import { requireAdmin } from "./auth";
 import {
   handleAccountOrders,
   handleCreateAddress,
@@ -23,6 +24,7 @@ import {
   handleAdminProducts,
   handleAdminPromos,
   handleAdminSettings,
+  handleAdminStaff,
   handleAdminSlides,
 } from "./admin";
 import {
@@ -34,7 +36,7 @@ import {
 import { ensureDatabase, runDatabaseMaintenance } from "./database";
 import type { Env } from "./env";
 import { apiExceptionResponse, fail, methodNotAllowed } from "./http";
-import { handleAdminUpload, handleDeleteUpload, handleMedia } from "./media";
+import { handleAdminUpload, handleCustomerReceiptUpload, handleDeleteUpload, handleMedia, handlePaymentReceiptFile, handlePaymentReceiptReview } from "./media";
 import { handleStorefront } from "./storefront";
 
 function oneOf(method: string, allowed: string[]): Response | null {
@@ -130,6 +132,13 @@ async function dispatchApi(request: Request, env: Env): Promise<Response> {
       if (rejected) return rejected;
       return method === "GET" ? handleAccountOrders(request, env.DB) : handleCreateOrder(request, env.DB);
     }
+    const orderReceiptMatch = path.match(/^\/orders\/([^/]+)\/receipt$/u);
+    if (orderReceiptMatch) {
+      const rejected = oneOf(method, ["POST"]);
+      if (rejected) return rejected;
+      if (!env.MEDIA) return fail(503, "MEDIA_UNAVAILABLE", "Receipt storage is not configured.");
+      return handleCustomerReceiptUpload(request, env, decodeURIComponent(orderReceiptMatch[1]));
+    }
     if (path === "/promos/validate") {
       const rejected = oneOf(method, ["POST"]);
       return rejected ?? handlePromoValidation(request, env.DB);
@@ -143,6 +152,16 @@ async function dispatchApi(request: Request, env: Env): Promise<Response> {
       return rejected ?? handleCreateEnquiry(request, env.DB);
     }
 
+    if (path.startsWith("/admin/")) {
+      const permission = path.startsWith("/admin/orders") || path.startsWith("/admin/payment-receipts") ? "orders"
+        : path.startsWith("/admin/customers") ? "customers"
+          : path.startsWith("/admin/promos") ? "promos"
+            : path.startsWith("/admin/enquiries") ? "enquiries"
+              : path.startsWith("/admin/products") || path.startsWith("/admin/slides") || path.startsWith("/admin/bundles") || path.startsWith("/admin/uploads") ? "content"
+                : path === "/admin/dashboard" ? "dashboard" : null;
+      if (permission) await requireAdmin(request, env.DB, { allowMustChange: true, permission });
+    }
+
     if (path === "/admin/dashboard") {
       const rejected = oneOf(method, ["GET"]);
       return rejected ?? handleAdminDashboard(request, env.DB);
@@ -150,6 +169,27 @@ async function dispatchApi(request: Request, env: Env): Promise<Response> {
     if (path === "/admin/settings") {
       const rejected = oneOf(method, ["GET", "PATCH"]);
       return rejected ?? handleAdminSettings(request, env.DB);
+    }
+    if (path === "/admin/staff") {
+      const rejected = oneOf(method, ["GET", "POST"]);
+      return rejected ?? handleAdminStaff(request, env.DB);
+    }
+    const staffMatch = path.match(/^\/admin\/staff\/([^/]+)$/u);
+    if (staffMatch) {
+      const rejected = oneOf(method, ["PATCH"]);
+      return rejected ?? handleAdminStaff(request, env.DB, decodeURIComponent(staffMatch[1]));
+    }
+    const receiptFileMatch = path.match(/^\/admin\/payment-receipts\/([^/]+)\/file$/u);
+    if (receiptFileMatch) {
+      const rejected = oneOf(method, ["GET"]);
+      if (rejected) return rejected;
+      return handlePaymentReceiptFile(request, env, decodeURIComponent(receiptFileMatch[1]));
+    }
+    const receiptReviewMatch = path.match(/^\/admin\/payment-receipts\/([^/]+)$/u);
+    if (receiptReviewMatch) {
+      const rejected = oneOf(method, ["PATCH"]);
+      if (rejected) return rejected;
+      return handlePaymentReceiptReview(request, env, decodeURIComponent(receiptReviewMatch[1]));
     }
     if (path === "/admin/products") {
       const rejected = oneOf(method, ["GET", "POST"]);

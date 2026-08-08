@@ -347,6 +347,7 @@ const fallbackSettings: StoreSettings = {
   shippingFee: 12,
   currency: "MYR",
   country: "Malaysia",
+  paymentMethods: [],
 };
 
 const fallbackBundle: Bundle = {
@@ -599,7 +600,7 @@ export default function Home() {
       if (storeResult.status === "fulfilled") {
         const data = storeResult.value;
         if (data.settings)
-          setSettings((current) => ({ ...current, ...data.settings }));
+          setSettings((current) => ({ ...current, ...data.settings, paymentMethods: data.paymentMethods ?? data.settings?.paymentMethods ?? current.paymentMethods }));
         {
           const nextProducts = (data.products ?? [])
             .filter((product) => product.active !== false)

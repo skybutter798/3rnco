@@ -10,6 +10,7 @@ The public storefront remains a static Vinext export. Browser requests to `/api/
 /home/rncomy/3rnco_app/releases/*       immutable PHP application releases
 /home/rncomy/3rnco_shared/.env          private production configuration, mode 0600
 /home/rncomy/3rnco_shared/uploads       persistent validated product/slider images
+/home/rncomy/3rnco_shared/payment-receipts private customer payment evidence, mode 0700
 /home/rncomy/backups/3rnco              retained local database/upload backups
 ```
 
@@ -30,6 +31,8 @@ Orders, customers, promo codes and enquiries remain empty in that fresh database
 ## Private environment
 
 Copy `server/php/.env.example` to `/home/rncomy/3rnco_shared/.env`, replace every placeholder and set mode `0600`. Production requires HTTPS, a random application key of at least 32 characters and a least-privilege MySQL user restricted to this one database and localhost.
+
+Create `/home/rncomy/3rnco_shared/payment-receipts` with mode `0700` and keep it outside `public_html`. Receipt files are served only through authenticated staff endpoints. The backup job archives this directory separately alongside the database and public media.
 
 Never place raw card details, online-banking credentials or customer passwords in the database. The current checkout records `manual_confirmation` orders only.
 

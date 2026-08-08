@@ -34,6 +34,21 @@ final class AuthContext
     {
         return $this->user !== null && (bool) $this->user['must_change_password'];
     }
+
+    public function isBackoffice(): bool
+    {
+        return in_array($this->role(), ['admin', 'staff'], true);
+    }
+
+    public function can(string $permission): bool
+    {
+        if ($this->role() === 'admin') {
+            return true;
+        }
+        $permissions = Security::jsonDecode($this->user['permissions_json'] ?? null, []);
+
+        return is_array($permissions) && in_array($permission, $permissions, true);
+    }
 }
 
 final class Auth
@@ -57,8 +72,8 @@ final class Auth
         $row = $this->database->fetchOne(
             'SELECT s.token_hash, s.user_id AS session_user_id, s.expires_at, s.revoked_at, ' .
             'u.id, u.public_id, u.role, u.username, u.email, u.first_name, u.last_name, u.display_name, u.phone, ' .
-            'u.date_of_birth, u.marketing_consent, u.status, u.must_change_password, u.email_verified_at, u.last_login_at, u.created_at, u.updated_at ' .
-            'FROM auth_sessions s LEFT JOIN users u ON u.id = s.user_id ' .
+            'u.date_of_birth, u.marketing_consent, u.status, u.must_change_password, u.email_verified_at, u.last_login_at, u.created_at, u.updated_at, sp.permissions_json ' .
+            'FROM auth_sessions s LEFT JOIN users u ON u.id = s.user_id LEFT JOIN staff_profiles sp ON sp.user_id = u.id ' .
             'WHERE s.token_hash = ? AND s.revoked_at IS NULL AND s.expires_at > ?',
             [$tokenHash, Security::now()],
         );
@@ -203,7 +218,7 @@ final class Auth
             throw new ApiException('AUTHENTICATION_REQUIRED', 'Sign in to continue.', 401);
         }
         $this->assertBootstrapAdminNetwork($context->user ?? [], $request);
-        $adminPassword = in_array((string) ($context->user['role'] ?? ''), ['admin', 'superadmin'], true);
+        $adminPassword = in_array((string) ($context->user['role'] ?? ''), ['admin', 'staff', 'superadmin'], true);
         Validator::requireValid($input, [
             'currentPassword' => 'required|string|max:200',
             'newPassword' => 'required|string|min:' . ($adminPassword ? '12' : '8') . '|max:200',
@@ -260,6 +275,7 @@ final class Auth
             'birthDate' => $user['date_of_birth'] ?? null,
             'marketingConsent' => (bool) ($user['marketing_consent'] ?? false),
             'mustChangePassword' => (bool) ($user['must_change_password'] ?? false),
+            'permissions' => Security::jsonDecode($user['permissions_json'] ?? null, []),
             'emailVerified' => ($user['email_verified_at'] ?? null) !== null,
             'lastLoginAt' => $user['last_login_at'] ?? null,
             'createdAt' => $user['created_at'] ?? null,
@@ -354,6 +370,7 @@ final class Auth
             'date_of_birth' => $row['date_of_birth'], 'marketing_consent' => $row['marketing_consent'], 'status' => $row['status'],
             'must_change_password' => $row['must_change_password'], 'email_verified_at' => $row['email_verified_at'], 'last_login_at' => $row['last_login_at'],
             'created_at' => $row['created_at'], 'updated_at' => $row['updated_at'],
+            'permissions_json' => $row['permissions_json'] ?? null,
         ];
     }
 }

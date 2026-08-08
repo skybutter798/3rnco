@@ -93,6 +93,8 @@ The canonical bundle payload is:
 
 Pending manual-payment orders reserve stock until `ORDER_RESERVATION_MINUTES`. Run the release job frequently so abandoned orders cannot hold stock indefinitely:
 
+Customer receipt files are stored in `PAYMENT_RECEIPT_DIR`, which must remain outside the public document root and use mode `0700`. The customer receives only receipt metadata; staff download the file through the authenticated API. The backup command includes a separate private receipts archive.
+
 ```cron
 */5 * * * * RNCO_ENV_FILE=/home/rncomy/3rnco_shared/.env /usr/local/bin/php /home/rncomy/3rnco_app/current/scripts/release-expired-orders.php >/dev/null 2>&1
 ```

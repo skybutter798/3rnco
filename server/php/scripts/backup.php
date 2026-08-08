@@ -91,7 +91,7 @@ function optionValue(string $value): string
     return '"' . addcslashes($value, "\\\"") . '"';
 }
 
-/** @return array<string,array{database:string,uploads:string,manifest:string}> */
+/** @return array<string,array{database:string,uploads:string,receipts:string,manifest:string}> */
 function backupSets(string $directory): array
 {
     $sets = [];
@@ -104,6 +104,7 @@ function backupSets(string $directory): array
         $sets[$timestamp] = [
             'database' => $databaseFile,
             'uploads' => $prefix . '-uploads.tar.gz',
+            'receipts' => $prefix . '-receipts.tar.gz',
             'manifest' => $prefix . '-manifest.json',
         ];
     }
@@ -190,8 +191,9 @@ try {
     $prefix = $backupDirectory . DIRECTORY_SEPARATOR . '3rnco-' . $timestamp;
     $databaseBackup = $prefix . '-database.sql.gz';
     $uploadsBackup = $prefix . '-uploads.tar.gz';
+    $receiptsBackup = $prefix . '-receipts.tar.gz';
     $manifestFile = $prefix . '-manifest.json';
-    $created = [$databaseBackup, $uploadsBackup, $manifestFile];
+    $created = [$databaseBackup, $uploadsBackup, $receiptsBackup, $manifestFile];
 
     runToGzip([
         $config->string('backup.mysqldump'), '--defaults-extra-file=' . $credentialsFile, '--single-transaction', '--quick',
@@ -209,16 +211,30 @@ try {
         throw new RuntimeException('The uploads archive is unexpectedly empty.');
     }
 
+    $receiptDirectory = $config->string('receipt.dir');
+    if (!is_dir($receiptDirectory) && !mkdir($receiptDirectory, 0700, true) && !is_dir($receiptDirectory)) {
+        throw new RuntimeException('Configured private receipt directory could not be created.');
+    }
+    chmod($receiptDirectory, 0700);
+    runCommand([
+        $config->string('backup.tar'), '-C', dirname($receiptDirectory), '-czf', $receiptsBackup, basename($receiptDirectory),
+    ], $stderrFile);
+    if (!is_file($receiptsBackup) || filesize($receiptsBackup) < 32) {
+        throw new RuntimeException('The private receipts archive is unexpectedly empty.');
+    }
+
     $manifest = [
         'createdAt' => gmdate('c'),
         'database' => ['file' => basename($databaseBackup), 'bytes' => filesize($databaseBackup), 'sha256' => hash_file('sha256', $databaseBackup)],
         'uploads' => ['file' => basename($uploadsBackup), 'bytes' => filesize($uploadsBackup), 'sha256' => hash_file('sha256', $uploadsBackup)],
+        'receipts' => ['file' => basename($receiptsBackup), 'bytes' => filesize($receiptsBackup), 'sha256' => hash_file('sha256', $receiptsBackup)],
     ];
     if (file_put_contents($manifestFile, json_encode($manifest, JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n", LOCK_EX) === false) {
         throw new RuntimeException('Unable to write the backup manifest.');
     }
     chmod($databaseBackup, 0600);
     chmod($uploadsBackup, 0600);
+    chmod($receiptsBackup, 0600);
     chmod($manifestFile, 0600);
     enforceRetention($backupDirectory);
 

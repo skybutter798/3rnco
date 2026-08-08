@@ -28,6 +28,7 @@ import {
   Trash2,
   Upload,
   Users,
+  UserCog,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -49,6 +50,8 @@ import type {
   Slide,
   StoreOrder,
   StoreSettings,
+  StaffMember,
+  PaymentMethod,
 } from "../store-types";
 
 type Props = {
@@ -92,6 +95,7 @@ const navItems = [
   ["Customers", Users],
   ["Promo Codes", Tag],
   ["Enquiries", MessageCircle],
+  ["Staff Access", UserCog],
   ["Store Settings", Settings],
 ] as const;
 type AdminSection = (typeof navItems)[number][0];
@@ -213,13 +217,14 @@ export default function AdminDashboard(props: Props) {
     setBundles,
     onStore,
   } = props;
-  const isAdmin =
-    sessionUser?.role === "admin" || sessionUser?.role === "superadmin";
+  const isAdmin = ["admin", "staff", "superadmin"].includes(sessionUser?.role || "");
+  const isOwner = sessionUser?.role === "admin" || sessionUser?.role === "superadmin";
   const locked = !!sessionUser?.mustChangePassword;
   const [orders, setOrders] = useState<StoreOrder[]>([]);
   const [customers, setCustomers] = useState<AdminCustomer[]>([]);
   const [promos, setPromos] = useState<Promo[]>([]);
   const [enquiries, setEnquiries] = useState<Enquiry[]>([]);
+  const [staff, setStaff] = useState<StaffMember[]>([]);
   const [dashboard, setDashboard] = useState<DashboardData>({});
   const [loading, setLoading] = useState(true);
   const [apiConnected, setApiConnected] = useState(false);
@@ -250,6 +255,7 @@ export default function AdminDashboard(props: Props) {
           apiRequest<unknown>("/admin/customers"),
           apiRequest<unknown>("/admin/promos"),
           apiRequest<unknown>("/admin/enquiries"),
+          isOwner ? apiRequest<unknown>("/admin/staff") : Promise.resolve({ staff: [] }),
         ]);
       })
       .then((results) => {
@@ -264,6 +270,7 @@ export default function AdminDashboard(props: Props) {
           customerResult,
           promoResult,
           enquiryResult,
+          staffResult,
         ] = results;
         setApiConnected(
           dashboardResult.status === "fulfilled" &&
@@ -321,6 +328,7 @@ export default function AdminDashboard(props: Props) {
           setEnquiries(
             listFrom<Enquiry>(enquiryResult.value, ["enquiries", "items"]),
           );
+        if (staffResult.status === "fulfilled") setStaff(listFrom<StaffMember>(staffResult.value, ["staff", "items"]));
         const rejected = results.find((result) => result.status === "rejected");
         if (rejected?.status === "rejected")
           setLoadError(errorMessage(rejected.reason));
@@ -329,7 +337,7 @@ export default function AdminDashboard(props: Props) {
     return () => {
       cancelled = true;
     };
-  }, [isAdmin, setBundles, setProducts, setSettings, setSlides]);
+  }, [isAdmin, isOwner, setBundles, setProducts, setSettings, setSlides]);
 
   if (!sessionChecked)
     return (
@@ -339,7 +347,7 @@ export default function AdminDashboard(props: Props) {
         </div>
       </AdminGate>
     );
-  if (!isAdmin) return <AdminLogin onSession={onSession} onStore={onStore} />;
+  if (!sessionUser || !isAdmin) return <AdminLogin onSession={onSession} onStore={onStore} />;
 
   const logout = async () => {
     try {
@@ -351,7 +359,13 @@ export default function AdminDashboard(props: Props) {
     }
   };
 
-  const canOpen = (label: string) => !locked || label === "Store Settings";
+  const sectionPermission: Record<string, string> = { Dashboard: "dashboard", Orders: "orders", Products: "content", Sliders: "content", "Mix & Match": "content", Customers: "customers", "Promo Codes": "promos", Enquiries: "enquiries" };
+  const canOpen = (label: string) => {
+    if (label === "Staff Access") return isOwner && !locked;
+    if (label === "Store Settings") return isOwner || locked;
+    if (locked) return false;
+    return isOwner || (sessionUser?.permissions || []).includes(sectionPermission[label] || "");
+  };
   const selectedEnquiry =
     enquiries.find((enquiry) => enquiry.id === activeEnquiryId) ||
     enquiries[0] ||
@@ -502,6 +516,14 @@ export default function AdminDashboard(props: Props) {
     setNotice(`${order.orderNumber || order.id} moved to ${status}.`);
   };
 
+  const reviewReceipt = async (order: StoreOrder, status: "verified" | "rejected", reviewNote?: string) => {
+    const receipt = order.paymentReceipt;
+    if (!receipt) return;
+    const result = await apiRequest<{ order?: StoreOrder; receipt?: StoreOrder["paymentReceipt"] }>(`/admin/payment-receipts/${receipt.id}`, { method: "PATCH", body: { status, reviewNote: reviewNote || null } });
+    setOrders((current) => current.map((item) => item.id === order.id ? { ...item, ...(result.order || {}), status: status === "verified" ? "payment_confirmed" : item.status, paymentStatus: status === "verified" ? "confirmed" : item.paymentStatus, paymentReceipt: result.receipt || { ...receipt, status, reviewNote } } : item));
+    setNotice(status === "verified" ? `${order.orderNumber || order.id} payment verified.` : "Receipt rejected; the customer can upload another one.");
+  };
+
   const exportOrders = () => {
     const cell = (value: unknown) => {
       const raw = String(value ?? "");
@@ -550,7 +572,7 @@ export default function AdminDashboard(props: Props) {
           <ChevronDown size={15} />
         </div>
         <nav aria-label="Admin sections">
-          {navItems.map(([label, Icon]) => (
+          {navItems.filter(([label]) => label !== "Staff Access" || isOwner).filter(([label]) => label !== "Store Settings" || isOwner || locked).map(([label, Icon]) => (
             <button
               className={section === label ? "is-active" : ""}
               onClick={() => canOpen(label) && setSection(label)}
@@ -703,6 +725,7 @@ export default function AdminDashboard(props: Props) {
                 orders={filteredOrders}
                 locked={locked}
                 onStatus={updateOrderStatus}
+                onReceipt={reviewReceipt}
               />
             </>
           )}
@@ -987,6 +1010,9 @@ export default function AdminDashboard(props: Props) {
                 />
               )}
             </>
+          )}
+          {section === "Staff Access" && isOwner && (
+            <StaffAccessView staff={staff} setStaff={setStaff} locked={locked} onNotice={setNotice} />
           )}
           {section === "Store Settings" && (
             <StoreSettingsView
@@ -1363,10 +1389,12 @@ function AdminOrders({
   orders,
   locked,
   onStatus,
+  onReceipt,
 }: {
   orders: StoreOrder[];
   locked: boolean;
   onStatus: (order: StoreOrder, status: string) => Promise<void>;
+  onReceipt: (order: StoreOrder, status: "verified" | "rejected", note?: string) => Promise<void>;
 }) {
   if (!orders.length)
     return (
@@ -1431,6 +1459,12 @@ function AdminOrders({
               <option value="delivered">Delivered</option>
               <option value="cancelled">Cancelled</option>
             </select>
+            {order.paymentReceipt?.status === "submitted" && <div className="receipt-review">
+              <a href={`/api/v1/admin/payment-receipts/${encodeURIComponent(order.paymentReceipt.id)}/file`} target="_blank" rel="noreferrer">View receipt</a>
+              <button type="button" onClick={() => void onReceipt(order, "verified")} disabled={locked}>Verify</button>
+              <button type="button" onClick={() => { const note = window.prompt("Tell the customer why this receipt cannot be accepted:") || "Please upload a clearer or correct payment receipt."; void onReceipt(order, "rejected", note); }} disabled={locked}>Reject</button>
+            </div>}
+            {order.paymentReceipt && order.paymentReceipt.status !== "submitted" && <small className={`receipt-label receipt-label--${order.paymentReceipt.status}`}>Receipt {order.paymentReceipt.status}</small>}
           </span>
         </div>
       ))}
@@ -1446,6 +1480,57 @@ function Status({ status }: { status: string }) {
       {status.replaceAll("_", " ")}
     </span>
   );
+}
+
+const staffPermissionOptions = [
+  ["dashboard", "Dashboard"], ["orders", "Orders & payment verification"], ["customers", "Customers"],
+  ["content", "Products, sliders & Mix and Match"], ["promos", "Promo codes"], ["enquiries", "Enquiries"],
+] as const;
+
+function PaymentMethodEditor({ method, disabled, onChange }: { method: PaymentMethod; disabled: boolean; onChange: (method: PaymentMethod) => void }) {
+  const [uploading, setUploading] = useState(false);
+  const uploadQr = async (file?: File) => {
+    if (!file) return;
+    setUploading(true);
+    try { onChange({ ...method, qrImage: await uploadAdminImage(file) }); } finally { setUploading(false); }
+  };
+  return <article className={method.active ? "is-active" : ""}>
+    <header><div><CreditCardIcon type={method.type} /><span><b>{method.name}</b><small>{method.type === "bank_transfer" ? "Account details" : "Scan-to-pay QR"}</small></span></div><label className="switch-field"><input type="checkbox" checked={method.active} disabled={disabled} onChange={(event) => onChange({ ...method, active: event.target.checked })} /><span />{method.active ? "Active" : "Hidden"}</label></header>
+    <div className="form-grid"><label>Customer label<input value={method.name} onChange={(event) => onChange({ ...method, name: event.target.value })} required /></label><label className="full">Payment instructions<textarea value={method.instructions || ""} onChange={(event) => onChange({ ...method, instructions: event.target.value })} placeholder="What the customer should do before uploading a receipt" /></label>
+      {method.type !== "bank_transfer" ? <label className="full payment-qr-upload">QR image{method.qrImage && <img src={method.qrImage} alt="Current payment QR" />}<span><Upload size={15} />{uploading ? "Uploading…" : method.qrImage ? "Replace QR" : "Upload QR"}<input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => void uploadQr(event.target.files?.[0])} /></span></label> : <><label>Bank name<input value={method.bankName || ""} onChange={(event) => onChange({ ...method, bankName: event.target.value })} /></label><label>Account name<input value={method.accountName || ""} onChange={(event) => onChange({ ...method, accountName: event.target.value })} /></label><label className="full">Account number<input value={method.accountNumber || ""} onChange={(event) => onChange({ ...method, accountNumber: event.target.value })} /></label></>}
+    </div>
+  </article>;
+}
+
+function CreditCardIcon({ type }: { type: PaymentMethod["type"] }) { return <span className="payment-method-icon">{type === "duitnow_qr" ? "DN" : type === "tng_qr" ? "TNG" : "BANK"}</span>; }
+
+function StaffAccessView({ staff, setStaff, locked, onNotice }: { staff: StaffMember[]; setStaff: Dispatch<SetStateAction<StaffMember[]>>; locked: boolean; onNotice: (message: string) => void }) {
+  const [editing, setEditing] = useState<StaffMember | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [draft, setDraft] = useState({ username: "", fullName: "", email: "", password: "", permissions: staffPermissionOptions.map(([key]) => key as string), status: "active" });
+  const [busy, setBusy] = useState(false); const [error, setError] = useState("");
+  const openCreate = () => { setEditing(null); setCreating(true); setDraft({ username: "", fullName: "", email: "", password: "", permissions: staffPermissionOptions.map(([key]) => key as string), status: "active" }); setError(""); };
+  const openEdit = (member: StaffMember) => { setEditing(member); setCreating(false); setDraft({ username: member.username, fullName: member.fullName, email: member.email || "", password: "", permissions: member.permissions, status: member.status }); setError(""); };
+  const save = async (event: React.FormEvent) => {
+    event.preventDefault(); setBusy(true); setError("");
+    try {
+      const path = editing ? `/admin/staff/${editing.id}` : "/admin/staff";
+      const body = { ...draft, email: draft.email || null, password: draft.password || undefined };
+      const result = await apiRequest<{ staff: StaffMember }>(path, { method: editing ? "PATCH" : "POST", body });
+      setStaff((current) => editing ? current.map((item) => item.id === result.staff.id ? result.staff : item) : [result.staff, ...current]);
+      setEditing(null); setCreating(false); onNotice(editing ? "Staff access updated." : "Staff account created with a temporary password.");
+    } catch (reason) { setError(errorMessage(reason)); } finally { setBusy(false); }
+  };
+  return <>
+    <AdminHeading eyebrow="Team access" title="Staff access" copy="Create individual sign-ins, choose what each teammate can manage, and disable access without sharing the owner account."><button className="button button--dark" onClick={openCreate} disabled={locked}><Plus size={16} />Create staff</button></AdminHeading>
+    {(creating || editing) && <form className="staff-editor" onSubmit={save}>
+      <div className="settings-section-heading"><div><p className="eyebrow">{editing ? "Edit access" : "New teammate"}</p><h2>{editing ? editing.fullName : "Create staff sign-in"}</h2></div><button type="button" onClick={() => { setEditing(null); setCreating(false); }}><X /></button></div>
+      <div className="form-grid"><label>Username<input value={draft.username} disabled={!!editing} onChange={(event) => setDraft({ ...draft, username: event.target.value.toLowerCase().replace(/[^a-z0-9._-]/g, "") })} minLength={3} required /></label><label>Full name<input value={draft.fullName} onChange={(event) => setDraft({ ...draft, fullName: event.target.value })} required /></label><label>Email (optional)<input type="email" value={draft.email} onChange={(event) => setDraft({ ...draft, email: event.target.value })} /></label><label>{editing ? "New temporary password (optional)" : "Temporary password"}<input type="password" minLength={8} value={draft.password} onChange={(event) => setDraft({ ...draft, password: event.target.value })} required={!editing} /><small>8 or more characters. Staff must change it after first sign-in.</small></label>{editing && <label>Status<select value={draft.status} onChange={(event) => setDraft({ ...draft, status: event.target.value })}><option value="active">Active</option><option value="disabled">Disabled</option></select></label>}</div>
+      <fieldset className="staff-permissions"><legend>Allowed sections</legend>{staffPermissionOptions.map(([key, label]) => <label key={key}><input type="checkbox" checked={draft.permissions.includes(key)} onChange={(event) => setDraft({ ...draft, permissions: event.target.checked ? [...draft.permissions, key] : draft.permissions.filter((item) => item !== key) })} />{label}</label>)}</fieldset>
+      {error && <p className="form-alert">{error}</p>}<button className="button button--dark" disabled={busy}>{busy ? "Saving…" : editing ? "Save staff access" : "Create staff account"}</button>
+    </form>}
+    {!staff.length ? <AdminEmpty icon={<UserCog />} title="No staff accounts." copy="Create a separate sign-in for teammates who help with orders, content or enquiries." /> : <div className="staff-list">{staff.map((member) => <article key={member.id}><span>{member.fullName.split(" ").map((part) => part[0]).join("").slice(0, 2)}</span><div><h3>{member.fullName}</h3><p>@{member.username}{member.email ? ` · ${member.email}` : ""}</p><small>{member.permissions.map((permission) => staffPermissionOptions.find(([key]) => key === permission)?.[1] || permission).join(" · ")}</small></div><b className={member.status === "active" ? "active" : "ended"}>{member.status}</b><button onClick={() => openEdit(member)}><Pencil size={14} />Edit access</button></article>)}</div>}
+  </>;
 }
 
 function StoreSettingsView({
@@ -1488,6 +1573,7 @@ function StoreSettingsView({
       setBusy(false);
     }
   };
+  if (user.role === "staff") return <><AdminHeading eyebrow="Account security" title="Set your staff password" copy="Replace the temporary password before opening your assigned sections." />{locked && <PasswordChange user={user} onSession={onSession} />}</>;
   return (
     <>
       <AdminHeading
@@ -1527,6 +1613,13 @@ function StoreSettingsView({
           >
             <Leaf size={13} />
             <span>{draft.announcement || "Your announcement preview"}</span>
+          </div>
+        </section>
+        <section className="payment-settings">
+          <div className="settings-section-heading"><div><p className="eyebrow">Manual verification</p><h2>Payment methods</h2></div><span>{(draft.paymentMethods || []).filter((method) => method.active).length} active</span></div>
+          <p className="settings-section-copy">Customers see these destinations inside each pending order, then submit a private receipt for staff review.</p>
+          <div className="payment-method-editor-list">
+            {(draft.paymentMethods || []).map((method, index) => <PaymentMethodEditor key={method.id} method={method} disabled={locked} onChange={(next) => setDraft({ ...draft, paymentMethods: (draft.paymentMethods || []).map((item, itemIndex) => itemIndex === index ? next : item) })} />)}
           </div>
         </section>
         <section>
@@ -2348,11 +2441,12 @@ function BundleAdminEditor({
       <div className="bundle-admin__steps">
         {draft.steps.map((step, index) => (
           <fieldset key={step.id}>
-            <legend>
-              <span>0{index + 1}</span>
-              <div>
+            <legend className="sr-only">Set step {index + 1}</legend>
+            <div className="bundle-admin__step-head">
+              <span><small>Step</small>{String(index + 1).padStart(2, "0")}</span>
+              <div className="bundle-admin__step-fields">
                 <label>
-                  Step label
+                  Customer-facing label
                   <input
                     value={step.label}
                     onChange={(event) =>
@@ -2368,7 +2462,7 @@ function BundleAdminEditor({
                   />
                 </label>
                 <label>
-                  Step guidance
+                  Short guidance
                   <input
                     value={step.description || ""}
                     onChange={(event) =>
@@ -2384,8 +2478,8 @@ function BundleAdminEditor({
                   />
                 </label>
               </div>
-            </legend>
-            <div>
+            </div>
+            <div className="bundle-admin__products">
               {products.map((product) => (
                 <label
                   className={

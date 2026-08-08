@@ -13,7 +13,7 @@ final class Seeder
     /** @return array<string, int> */
     public function seed(): array
     {
-        $counts = ['admin' => 0, 'settings' => 0, 'products' => 0, 'slides' => 0, 'gallery' => 0, 'bundles' => 0];
+        $counts = ['admin' => 0, 'settings' => 0, 'paymentMethods' => 0, 'products' => 0, 'slides' => 0, 'gallery' => 0, 'bundles' => 0];
         $now = Security::now();
 
         $counts['admin'] += $this->insertIgnore('users', [
@@ -58,6 +58,18 @@ final class Seeder
                 'updated_by' => null,
                 'created_at' => $now,
                 'updated_at' => $now,
+            ]);
+        }
+
+        foreach ([
+            ['id' => 'duitnow-qr', 'type' => 'duitnow_qr', 'name' => 'DuitNow QR', 'sort' => 0],
+            ['id' => 'touch-n-go-qr', 'type' => 'tng_qr', 'name' => "Touch 'n Go eWallet QR", 'sort' => 1],
+            ['id' => 'bank-transfer', 'type' => 'bank_transfer', 'name' => 'Bank transfer', 'sort' => 2],
+        ] as $method) {
+            $counts['paymentMethods'] += $this->insertIgnore('payment_methods', [
+                'id' => $method['id'], 'method_type' => $method['type'], 'display_name' => $method['name'], 'is_active' => 0,
+                'instructions' => 'Complete the transfer, then upload your receipt from My account.', 'qr_image_url' => null,
+                'bank_name' => null, 'account_name' => null, 'account_number' => null, 'sort_order' => $method['sort'], 'created_at' => $now, 'updated_at' => $now,
             ]);
         }
 

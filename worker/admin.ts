@@ -1,5 +1,5 @@
-import { requireAdmin } from "./auth";
-import { randomId } from "./crypto";
+import { requireAdmin, requireOwner } from "./auth";
+import { hashPassword, isAcceptableCustomerPassword, normalizeEmail, normalizeUsername, randomId } from "./crypto";
 import { allRows } from "./database";
 import {
   ApiError,
@@ -13,6 +13,73 @@ import {
 import { loadBundles, loadProducts, storefrontPayload } from "./storefront";
 
 type AdminSession = Awaited<ReturnType<typeof requireAdmin>>;
+
+const staffPermissions = ["dashboard", "orders", "customers", "content", "promos", "enquiries"] as const;
+
+function normalizedStaffPermissions(value: unknown): string[] {
+  if (!Array.isArray(value)) throw new ApiError(422, "VALIDATION_ERROR", "Choose staff permissions.", { permissions: "Choose at least one permission." });
+  const permissions = [...new Set(value.map(String))];
+  if (permissions.some((permission) => !staffPermissions.includes(permission as typeof staffPermissions[number]))) {
+    throw new ApiError(422, "VALIDATION_ERROR", "Choose only supported staff permissions.", { permissions: "One or more permissions are not supported." });
+  }
+  return permissions;
+}
+
+async function loadStaff(db: D1Database) {
+  const rows = await allRows<{ id: string; username: string; email: string | null; displayName: string; status: string; permissionsJson: string; mustChangePassword: number; lastLoginAt: number | null; createdAt: number }>(db.prepare(`SELECT u.id, u.username, u.email, sp.display_name AS displayName, u.status,
+    sp.permissions_json AS permissionsJson, u.must_change_password AS mustChangePassword,
+    u.last_login_at AS lastLoginAt, u.created_at AS createdAt
+    FROM users u JOIN staff_profiles sp ON sp.user_id = u.id ORDER BY u.created_at DESC`));
+  return rows.map((row) => ({ id: row.id, username: row.username, email: row.email, fullName: row.displayName, status: row.status.toLowerCase(), permissions: JSON.parse(row.permissionsJson) as string[], mustChangePassword: Boolean(row.mustChangePassword), lastLoginAt: row.lastLoginAt ? new Date(row.lastLoginAt * 1000).toISOString() : null, createdAt: new Date(row.createdAt * 1000).toISOString() }));
+}
+
+export async function handleAdminStaff(request: Request, db: D1Database, id?: string): Promise<Response> {
+  const session = await requireOwner(request, db, { mutation: request.method !== "GET" });
+  if (request.method === "GET") return ok({ staff: await loadStaff(db) });
+  const body = await readJson<Record<string, unknown>>(request);
+  if (request.method === "POST") {
+    const username = normalizeUsername(requiredString(body.username, "username", { min: 3, max: 64 }));
+    if (!/^[a-z0-9._-]{3,64}$/u.test(username)) throw new ApiError(422, "VALIDATION_ERROR", "Use a valid staff username.", { username: "Use lowercase letters, numbers, dots, dashes or underscores." });
+    const fullName = requiredString(body.fullName, "fullName", { min: 2, max: 160 });
+    const password = requiredString(body.password, "password", { min: 8, max: 128 });
+    if (!isAcceptableCustomerPassword(password)) throw new ApiError(422, "VALIDATION_ERROR", "Use at least 8 characters.", { password: "Use 8 to 128 characters." });
+    const email = optionalString(body.email, "email", 254);
+    const normalizedEmail = email ? normalizeEmail(email) : null;
+    const permissions = normalizedStaffPermissions(body.permissions);
+    const userId = randomId("staff");
+    try {
+      await db.batch([
+        db.prepare(`INSERT INTO users (id, username, username_normalized, email, email_normalized, password_hash, role, status, must_change_password)
+          VALUES (?, ?, ?, ?, ?, ?, 'ADMIN', 'ACTIVE', 1)`).bind(userId, username, username, normalizedEmail, normalizedEmail, await hashPassword(password)),
+        db.prepare("INSERT INTO staff_profiles (user_id, display_name, permissions_json, created_by) VALUES (?, ?, ?, ?)").bind(userId, fullName, JSON.stringify(permissions), session.user.id),
+        auditStatement(db, session, "CREATE", "STAFF", userId, { username, fullName, permissions }),
+      ]);
+    } catch {
+      throw new ApiError(409, "STAFF_LOGIN_IN_USE", "That staff username or email is already in use.");
+    }
+    return ok({ staff: (await loadStaff(db)).find((member) => member.id === userId) }, 201);
+  }
+  if (!id) throw new ApiError(404, "STAFF_NOT_FOUND", "The staff account could not be found.");
+  const current = await db.prepare("SELECT u.id, u.email, u.status, sp.display_name AS displayName, sp.permissions_json AS permissionsJson FROM users u JOIN staff_profiles sp ON sp.user_id = u.id WHERE u.id = ?").bind(id).first<{ id: string; email: string | null; status: string; displayName: string; permissionsJson: string }>();
+  if (!current) throw new ApiError(404, "STAFF_NOT_FOUND", "The staff account could not be found.");
+  const fullName = optionalString(body.fullName, "fullName", 160) ?? current.displayName;
+  const emailValue = body.email === null || body.email === "" ? null : (optionalString(body.email, "email", 254) ?? current.email);
+  const email = emailValue ? normalizeEmail(emailValue) : null;
+  const status = (optionalString(body.status, "status", 20) ?? current.status).toUpperCase();
+  if (!["ACTIVE", "DISABLED"].includes(status)) throw new ApiError(422, "VALIDATION_ERROR", "Choose an active or disabled status.");
+  const permissions = body.permissions === undefined ? JSON.parse(current.permissionsJson) as string[] : normalizedStaffPermissions(body.permissions);
+  const password = optionalString(body.password, "password", 128);
+  if (password && !isAcceptableCustomerPassword(password)) throw new ApiError(422, "VALIDATION_ERROR", "Use at least 8 characters.", { password: "Use 8 to 128 characters." });
+  const statements = [
+    db.prepare("UPDATE users SET email = ?, email_normalized = ?, status = ?, updated_at = unixepoch() WHERE id = ?").bind(email, email, status, id),
+    db.prepare("UPDATE staff_profiles SET display_name = ?, permissions_json = ?, updated_at = unixepoch() WHERE user_id = ?").bind(fullName, JSON.stringify(permissions), id),
+    auditStatement(db, session, "UPDATE", "STAFF", id, { fullName, email, status, permissions }),
+  ];
+  if (password) statements.push(db.prepare("UPDATE users SET password_hash = ?, must_change_password = 1, updated_at = unixepoch() WHERE id = ?").bind(await hashPassword(password), id));
+  if (password || status === "DISABLED") statements.push(db.prepare("UPDATE user_sessions SET revoked_at = unixepoch() WHERE user_id = ? AND revoked_at IS NULL").bind(id));
+  await db.batch(statements);
+  return ok({ staff: (await loadStaff(db)).find((member) => member.id === id) });
+}
 
 function moneyMinor(value: unknown, field: string): number {
   if (
@@ -183,7 +250,7 @@ export async function handleAdminSettings(
     await requireAdmin(request, db, { allowMustChange: true });
     return ok({ settings: (await storefrontPayload(db)).settings });
   }
-  const session = await requireAdmin(request, db, { mutation: true });
+  const session = await requireOwner(request, db, { mutation: true });
   const body = await readJson<Record<string, unknown>>(request);
   const storeName = requiredString(body.storeName, "storeName", {
     min: 2,
@@ -222,6 +289,32 @@ export async function handleAdminSettings(
     body.shippingThreshold,
     "shippingThreshold",
   );
+  const paymentMethodsValue = body.paymentMethods;
+  if (paymentMethodsValue !== undefined && (!Array.isArray(paymentMethodsValue) || paymentMethodsValue.length > 12)) throw new ApiError(422, "VALIDATION_ERROR", "Configure up to 12 payment methods.", { paymentMethods: "Payment methods must be a list." });
+  const paymentMethodStatements = (Array.isArray(paymentMethodsValue) ? paymentMethodsValue : []).map((value, index) => {
+    if (!value || typeof value !== "object") throw new ApiError(422, "VALIDATION_ERROR", "Complete each payment method.");
+    const method = value as Record<string, unknown>;
+    const type = requiredString(method.type, `paymentMethods.${index}.type`, { min: 3, max: 30 });
+    if (!["duitnow_qr", "tng_qr", "bank_transfer"].includes(type)) throw new ApiError(422, "VALIDATION_ERROR", "Choose a supported payment method.");
+    const id = requiredString(method.id, `paymentMethods.${index}.id`, { min: 2, max: 64 });
+    const name = requiredString(method.name, `paymentMethods.${index}.name`, { min: 2, max: 120 });
+    const enabled = booleanField(method.active, false) ? 1 : 0;
+    const instructions = optionalString(method.instructions, `paymentMethods.${index}.instructions`, 1000);
+    const qrImage = optionalString(method.qrImage, `paymentMethods.${index}.qrImage`, 1000);
+    const bankName = optionalString(method.bankName, `paymentMethods.${index}.bankName`, 120);
+    const accountName = optionalString(method.accountName, `paymentMethods.${index}.accountName`, 160);
+    const accountNumber = optionalString(method.accountNumber, `paymentMethods.${index}.accountNumber`, 100);
+    if (qrImage) safeImageUrl(qrImage, `paymentMethods.${index}.qrImage`);
+    if (enabled && ["duitnow_qr", "tng_qr"].includes(type) && !qrImage) throw new ApiError(422, "VALIDATION_ERROR", "Upload a QR image before enabling this method.", { [`paymentMethods.${index}.qrImage`]: "QR image required." });
+    if (enabled && type === "bank_transfer" && (!bankName || !accountName || !accountNumber)) throw new ApiError(422, "VALIDATION_ERROR", "Complete the bank details before enabling bank transfer.");
+    return db.prepare(`INSERT INTO payment_methods (id, method_type, display_name, enabled, instructions, qr_image_url, bank_name, account_name, account_number, sort_order)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET method_type = excluded.method_type, display_name = excluded.display_name,
+      enabled = excluded.enabled, instructions = excluded.instructions, qr_image_url = excluded.qr_image_url,
+      bank_name = excluded.bank_name, account_name = excluded.account_name, account_number = excluded.account_number,
+      sort_order = excluded.sort_order, updated_at = unixepoch()`)
+      .bind(id, type, name, enabled, instructions, qrImage, bankName, accountName, accountNumber, Number(method.sortOrder ?? index));
+  });
   await db.batch([
     db
       .prepare(
@@ -258,6 +351,7 @@ export async function handleAdminSettings(
       )
       .bind(facebookUrl),
     auditStatement(db, session, "UPDATE", "STORE_SETTINGS", "default", body),
+    ...paymentMethodStatements,
   ]);
   return ok({ settings: (await storefrontPayload(db)).settings });
 }
@@ -1285,6 +1379,15 @@ async function loadAdminOrders(db: D1Database, limit = 200) {
     bundle_instance_id AS bundleInstanceId, bundle_name_snapshot AS bundleName,
     bundle_step_name_snapshot AS bundleStepName FROM order_items ORDER BY order_id, id`),
   );
+  const receipts = await allRows<{
+    id: string; orderId: string; status: string; paymentMethodId: string; paymentMethodName: string;
+    customerReference: string | null; customerNote: string | null; originalName: string; mimeType: string;
+    sizeBytes: number; reviewNote: string | null; createdAt: number; reviewedAt: number | null;
+  }>(db.prepare(`SELECT r.id, r.order_id AS orderId, r.status, r.payment_method_id AS paymentMethodId,
+    m.display_name AS paymentMethodName, r.customer_reference AS customerReference, r.customer_note AS customerNote,
+    r.original_name AS originalName, r.mime_type AS mimeType, r.size_bytes AS sizeBytes,
+    r.review_note AS reviewNote, r.created_at AS createdAt, r.reviewed_at AS reviewedAt
+    FROM payment_receipts r JOIN payment_methods m ON m.id = r.payment_method_id ORDER BY r.created_at DESC`));
   return orders.map((order) => ({
     id: order.id,
     orderNumber: order.orderNumber,
@@ -1298,6 +1401,10 @@ async function loadAdminOrders(db: D1Database, limit = 200) {
     subtotal: order.subtotalMinor / 100,
     shipping: order.shippingMinor / 100,
     discount: order.discountMinor / 100,
+    paymentReceipt: (() => {
+      const receipt = receipts.find((candidate) => candidate.orderId === order.id);
+      return receipt ? { ...receipt, status: receipt.status.toLowerCase(), createdAt: new Date(receipt.createdAt * 1000).toISOString(), reviewedAt: receipt.reviewedAt ? new Date(receipt.reviewedAt * 1000).toISOString() : null } : null;
+    })(),
     lines: lines
       .filter((line) => line.orderId === order.id)
       .map((line) => ({

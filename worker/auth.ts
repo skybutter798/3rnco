@@ -29,7 +29,7 @@ const ADMIN_IDLE_SECONDS = 30 * 60;
 const DUMMY_PASSWORD_HASH =
   "pbkdf2-sha256$600000$Ok99CJ-BqedFBoBbyHqbTg$Whmq8EHFjvl8T1ycwwEDKkNeANMdGxday15e2k5e_wg";
 
-type UserRole = "ADMIN" | "CUSTOMER";
+type UserRole = "ADMIN" | "STAFF" | "CUSTOMER";
 
 type SessionRow = {
   sessionId: string;
@@ -45,6 +45,7 @@ type SessionRow = {
   idleExpiresAt: number;
   absoluteExpiresAt: number;
   revokedAt: number | null;
+  permissionsJson: string | null;
 };
 
 export type AuthenticatedSession = {
@@ -60,6 +61,7 @@ export type AuthenticatedSession = {
     fullName: string;
     phone: string | null;
     mustChangePassword: boolean;
+    permissions: string[];
   };
 };
 
@@ -112,6 +114,7 @@ function sessionUser(session: AuthenticatedSession) {
     fullName: session.user.fullName,
     phone: session.user.phone,
     mustChangePassword: session.user.mustChangePassword,
+    permissions: session.user.permissions,
   };
 }
 
@@ -150,9 +153,9 @@ async function createSession(
 ): Promise<CreatedSession> {
   const now = nowSeconds();
   const absoluteSeconds =
-    role === "ADMIN" ? ADMIN_ABSOLUTE_SECONDS : CUSTOMER_ABSOLUTE_SECONDS;
+    role !== "CUSTOMER" ? ADMIN_ABSOLUTE_SECONDS : CUSTOMER_ABSOLUTE_SECONDS;
   const idleSeconds =
-    role === "ADMIN" ? ADMIN_IDLE_SECONDS : CUSTOMER_IDLE_SECONDS;
+    role !== "CUSTOMER" ? ADMIN_IDLE_SECONDS : CUSTOMER_IDLE_SECONDS;
   const token = randomToken(32);
   const csrfToken = randomToken(24);
   const userAgent = request.headers.get("user-agent") ?? "";
@@ -194,12 +197,13 @@ export async function getSession(
       s.id AS sessionId, s.csrf_token_hash AS csrfTokenHash,
       s.idle_expires_at AS idleExpiresAt, s.absolute_expires_at AS absoluteExpiresAt,
       s.revoked_at AS revokedAt,
-      u.id AS userId, u.username, u.email, u.role, u.status,
+      u.id AS userId, u.username, u.email, CASE WHEN sp.user_id IS NOT NULL THEN 'STAFF' ELSE u.role END AS role, u.status,
       u.must_change_password AS mustChangePassword,
-      p.full_name AS fullName, p.phone_e164 AS phoneE164
+      p.full_name AS fullName, p.phone_e164 AS phoneE164, sp.permissions_json AS permissionsJson
     FROM user_sessions s
     JOIN users u ON u.id = s.user_id
     LEFT JOIN customer_profiles p ON p.user_id = u.id
+    LEFT JOIN staff_profiles sp ON sp.user_id = u.id
     WHERE s.token_hash = ?
     LIMIT 1`,
     )
@@ -223,7 +227,7 @@ export async function getSession(
   }
 
   const idleSeconds =
-    row.role === "ADMIN" ? ADMIN_IDLE_SECONDS : CUSTOMER_IDLE_SECONDS;
+    row.role !== "CUSTOMER" ? ADMIN_IDLE_SECONDS : CUSTOMER_IDLE_SECONDS;
   const nextIdleExpiry = Math.min(row.absoluteExpiresAt, now + idleSeconds);
   if (nextIdleExpiry - row.idleExpiresAt > 60) {
     await db
@@ -246,6 +250,7 @@ export async function getSession(
       fullName: row.fullName ?? row.username ?? row.email ?? "Customer",
       phone: row.phoneE164,
       mustChangePassword: Boolean(row.mustChangePassword),
+      permissions: row.permissionsJson ? JSON.parse(row.permissionsJson) as string[] : [],
     },
   };
 }
@@ -277,10 +282,10 @@ export async function requireCustomer(
 export async function requireAdmin(
   request: Request,
   db: D1Database,
-  options: { allowMustChange?: boolean; mutation?: boolean } = {},
+  options: { allowMustChange?: boolean; mutation?: boolean; permission?: string } = {},
 ): Promise<AuthenticatedSession> {
   const session = await requireSession(request, db);
-  if (session.user.role !== "ADMIN")
+  if (!new Set<UserRole>(["ADMIN", "STAFF"]).has(session.user.role))
     throw new ApiError(403, "ADMIN_REQUIRED", "Admin access is required.");
   if (!options.allowMustChange && session.user.mustChangePassword) {
     throw new ApiError(
@@ -289,7 +294,21 @@ export async function requireAdmin(
       "Change the default password before making admin changes.",
     );
   }
+  if (session.user.role === "STAFF" && options.permission && !session.user.permissions.includes(options.permission)) {
+    throw new ApiError(403, "STAFF_PERMISSION_REQUIRED", "Your staff account does not have access to this area.");
+  }
   if (options.mutation) await verifyCsrf(request, session);
+  return session;
+}
+
+export async function requireOwner(
+  request: Request,
+  db: D1Database,
+  options: { allowMustChange?: boolean; mutation?: boolean; permission?: string } = {},
+): Promise<AuthenticatedSession> {
+  const session = await requireAdmin(request, db, options);
+  if (session.user.role !== "ADMIN")
+    throw new ApiError(403, "OWNER_REQUIRED", "Store owner access is required.");
   return session;
 }
 
@@ -447,11 +466,14 @@ export async function handleLogin(
   const user = await db
     .prepare(
       `SELECT
-      u.id, u.username, u.email, u.password_hash AS passwordHash, u.role, u.status,
+      u.id, u.username, u.email, u.password_hash AS passwordHash,
+      CASE WHEN sp.user_id IS NOT NULL THEN 'STAFF' ELSE u.role END AS role, u.status,
       u.must_change_password AS mustChangePassword, u.failed_login_count AS failedLoginCount,
-      u.locked_until AS lockedUntil, p.full_name AS fullName, p.phone_e164 AS phoneE164
+      u.locked_until AS lockedUntil, p.full_name AS fullName, p.phone_e164 AS phoneE164,
+      sp.permissions_json AS permissionsJson
     FROM users u
     LEFT JOIN customer_profiles p ON p.user_id = u.id
+    LEFT JOIN staff_profiles sp ON sp.user_id = u.id
     WHERE u.email_normalized = ? OR u.username_normalized = ?
     LIMIT 1`,
     )
@@ -468,6 +490,7 @@ export async function handleLogin(
       lockedUntil: number | null;
       fullName: string | null;
       phoneE164: string | null;
+      permissionsJson: string | null;
     }>();
 
   const now = nowSeconds();
@@ -485,7 +508,7 @@ export async function handleLogin(
     !user ||
     !passwordMatches ||
     user.status !== "ACTIVE" ||
-    (adminOnly && user.role !== "ADMIN")
+    (adminOnly && !["ADMIN", "STAFF"].includes(user.role))
   ) {
     if (user)
       await db
@@ -527,6 +550,7 @@ export async function handleLogin(
       fullName: user.fullName ?? user.username ?? user.email ?? "Customer",
       phone: user.phoneE164,
       mustChangePassword: Boolean(user.mustChangePassword),
+      permissions: user.permissionsJson ? JSON.parse(user.permissionsJson) as string[] : [],
     },
   };
   return appendSessionCookies(
@@ -541,7 +565,7 @@ export async function handleSession(
   adminOnly = false,
 ): Promise<Response> {
   const session = await getSession(request, db);
-  if (!session || (adminOnly && session.user.role !== "ADMIN")) {
+  if (!session || (adminOnly && !["ADMIN", "STAFF"].includes(session.user.role))) {
     return appendClearedCookies(
       ok({ authenticated: false, user: null, csrfToken: null }),
     );

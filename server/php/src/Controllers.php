@@ -103,6 +103,7 @@ final class AccountController
         private readonly Database $database,
         private readonly Auth $auth,
         private readonly OrderService $orders,
+        private readonly PaymentReceiptService $receipts,
         private readonly AuditLogger $audit,
     ) {
     }
@@ -220,6 +221,40 @@ final class AccountController
     {
         $user = $this->requiredUser($context);
         return Response::success(['orders' => $this->orders->customerOrders((int) $user['id'])]);
+    }
+
+    public function uploadPaymentReceipt(Request $request, array $params, ?AuthContext $context): Response
+    {
+        $user = $this->requiredUser($context);
+        $order = $this->database->fetchOne('SELECT * FROM orders WHERE public_id = ? AND customer_id = ? AND deleted_at IS NULL', [$params['id'], $user['id']]);
+        if ($order === null) {
+            throw new ApiException('ORDER_NOT_FOUND', 'The order was not found.', 404);
+        }
+        if ($order['status'] !== 'pending_payment' || $order['payment_status'] !== 'pending') {
+            throw new ApiException('ORDER_NOT_AWAITING_PAYMENT', 'This order is not waiting for payment.', 409);
+        }
+        $methodId = trim((string) $request->input('paymentMethodId', ''));
+        $method = $this->database->fetchOne('SELECT id FROM payment_methods WHERE id = ? AND is_active = 1', [$methodId]);
+        if ($method === null) {
+            throw new ApiException('PAYMENT_METHOD_UNAVAILABLE', 'Choose an available payment method.', 422, ['paymentMethodId' => 'This payment method is unavailable.']);
+        }
+        $existing = $this->database->fetchOne("SELECT id FROM payment_receipts WHERE order_id = ? AND status IN ('submitted','verified') LIMIT 1", [$order['id']]);
+        if ($existing !== null) {
+            throw new ApiException('RECEIPT_ALREADY_SUBMITTED', 'A receipt is already under review for this order.', 409);
+        }
+        $reference = trim((string) $request->input('customerReference', '')) ?: null;
+        $note = trim((string) $request->input('customerNote', '')) ?: null;
+        if (($reference !== null && mb_strlen($reference) > 160) || ($note !== null && mb_strlen($note) > 1000)) {
+            throw new ApiException('VALIDATION_FAILED', 'Please shorten the payment reference or note.', 422);
+        }
+        $file = $request->file('file') ?? $request->file('receipt');
+        if ($file === null) {
+            throw new ApiException('RECEIPT_REQUIRED', 'Choose a receipt image or PDF.', 422);
+        }
+        $receipt = $this->receipts->store($file, (int) $order['id'], (int) $user['id'], $methodId, $reference, $note);
+        $this->audit->log($context, $request, 'payment_receipt.submitted', 'order', (string) $order['public_id'], null, ['receiptId' => $receipt['id'], 'paymentMethodId' => $methodId]);
+
+        return Response::success(['receipt' => $receipt, 'order' => $this->orders->getOrder((int) $order['id'], (int) $user['id'])], 201);
     }
 
     /** @return array<string, mixed> */
@@ -352,6 +387,7 @@ final class AdminController
         private readonly StoreRepository $store,
         private readonly OrderService $orders,
         private readonly UploadService $uploads,
+        private readonly PaymentReceiptService $receipts,
         private readonly Auth $auth,
         private readonly AuditLogger $audit,
     ) {
@@ -378,15 +414,99 @@ final class AdminController
         ]]);
     }
 
+    public function staff(Request $request, array $params, ?AuthContext $context): Response
+    {
+        $rows = $this->database->fetchAll("SELECT u.*, sp.permissions_json FROM users u JOIN staff_profiles sp ON sp.user_id = u.id WHERE u.role = 'staff' ORDER BY u.created_at DESC");
+        return Response::success(['staff' => array_map(fn (array $row): array => $this->mapStaff($row), $rows)]);
+    }
+
+    public function createStaff(Request $request, array $params, ?AuthContext $context): Response
+    {
+        $input = $request->json();
+        Validator::requireValid($input, ['username' => 'required|string|min:3|max:64', 'fullName' => 'required|string|max:160', 'email' => 'sometimes|nullable|string|email|max:191', 'password' => 'required|string|min:8|max:200', 'permissions' => 'required|array']);
+        $username = strtolower(trim((string) $input['username']));
+        if (!preg_match('/^[a-z0-9._-]{3,64}$/', $username)) {
+            throw new ApiException('VALIDATION_FAILED', 'Please correct the highlighted fields.', 422, ['username' => 'Use lowercase letters, numbers, dots, dashes or underscores.']);
+        }
+        Validator::password((string) $input['password'], 8, false);
+        $permissions = $this->normalizeStaffPermissions((array) $input['permissions']);
+        $parts = preg_split('/\s+/', trim((string) $input['fullName']), 2) ?: [];
+        $publicId = Security::uuid();
+        $now = Security::now();
+        try {
+            $this->database->transaction(function () use ($input, $username, $permissions, $parts, $publicId, $now, $context): void {
+                $this->database->execute('INSERT INTO users (public_id, role, username, email, password_hash, first_name, last_name, display_name, phone, date_of_birth, marketing_consent, status, must_change_password, email_verified_at, last_login_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [$publicId, 'staff', $username, !empty($input['email']) ? Security::normalizeEmail((string) $input['email']) : null, Security::passwordHash((string) $input['password']), $parts[0] ?? '', $parts[1] ?? '', trim((string) $input['fullName']), null, null, 0, 'active', 1, null, null, $now, $now]);
+                $this->database->execute('INSERT INTO staff_profiles (user_id, permissions_json, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?)', [$this->database->lastInsertId(), Security::jsonEncode($permissions), $context?->userId(), $now, $now]);
+            });
+        } catch (PDOException $exception) {
+            throw new ApiException('STAFF_LOGIN_IN_USE', 'That staff username or email is already in use.', 409, [], $exception);
+        }
+        $row = $this->database->fetchOne('SELECT u.*, sp.permissions_json FROM users u JOIN staff_profiles sp ON sp.user_id = u.id WHERE u.public_id = ?', [$publicId]);
+        $staff = $this->mapStaff($row ?? []);
+        $this->audit->log($context, $request, 'staff.created', 'user', $publicId, null, $staff);
+        return Response::success(['staff' => $staff], 201);
+    }
+
+    public function updateStaff(Request $request, array $params, ?AuthContext $context): Response
+    {
+        $row = $this->database->fetchOne("SELECT u.*, sp.permissions_json FROM users u JOIN staff_profiles sp ON sp.user_id = u.id WHERE u.public_id = ? AND u.role = 'staff'", [$params['id']]);
+        if ($row === null) throw new ApiException('STAFF_NOT_FOUND', 'The staff account was not found.', 404);
+        $input = $request->json();
+        Validator::requireValid($input, ['fullName' => 'sometimes|string|max:160', 'email' => 'sometimes|nullable|string|email|max:191', 'password' => 'sometimes|nullable|string|min:8|max:200', 'permissions' => 'sometimes|array', 'status' => 'sometimes|string|in:active,disabled']);
+        $permissions = array_key_exists('permissions', $input) ? $this->normalizeStaffPermissions((array) $input['permissions']) : Security::jsonDecode($row['permissions_json'] ?? null, []);
+        $name = trim((string) ($input['fullName'] ?? ($row['display_name'] ?: trim($row['first_name'] . ' ' . $row['last_name']))));
+        $parts = preg_split('/\s+/', $name, 2) ?: [];
+        if (!empty($input['password'])) Validator::password((string) $input['password'], 8, false);
+        $hash = !empty($input['password']) ? Security::passwordHash((string) $input['password']) : $row['password_hash'];
+        $mustChange = !empty($input['password']) ? 1 : (int) $row['must_change_password'];
+        $status = (string) ($input['status'] ?? $row['status']);
+        $now = Security::now();
+        $this->database->transaction(function () use ($row, $input, $permissions, $parts, $name, $hash, $mustChange, $status, $now): void {
+            $this->database->execute('UPDATE users SET email = ?, password_hash = ?, first_name = ?, last_name = ?, display_name = ?, status = ?, must_change_password = ?, updated_at = ? WHERE id = ?', [array_key_exists('email', $input) ? (!empty($input['email']) ? Security::normalizeEmail((string) $input['email']) : null) : $row['email'], $hash, $parts[0] ?? '', $parts[1] ?? '', $name, $status, $mustChange, $now, $row['id']]);
+            $this->database->execute('UPDATE staff_profiles SET permissions_json = ?, updated_at = ? WHERE user_id = ?', [Security::jsonEncode($permissions), $now, $row['id']]);
+            if ($status === 'disabled' || !empty($input['password'])) $this->database->execute('UPDATE auth_sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL', [$now, $row['id']]);
+        });
+        $saved = $this->database->fetchOne('SELECT u.*, sp.permissions_json FROM users u JOIN staff_profiles sp ON sp.user_id = u.id WHERE u.id = ?', [$row['id']]);
+        $staff = $this->mapStaff($saved ?? []);
+        $this->audit->log($context, $request, 'staff.updated', 'user', $params['id'], $this->mapStaff($row), $staff);
+        return Response::success(['staff' => $staff]);
+    }
+
+    public function paymentReceiptFile(Request $request, array $params, ?AuthContext $context): Response
+    {
+        $file = $this->receipts->file($params['id']);
+        return Response::file((string) $file['bytes'], (string) $file['mimeType'], (string) $file['originalName']);
+    }
+
+    public function reviewPaymentReceipt(Request $request, array $params, ?AuthContext $context): Response
+    {
+        $input = $request->json();
+        Validator::requireValid($input, ['status' => 'required|string|in:verified,rejected', 'reviewNote' => 'sometimes|nullable|string|max:1000']);
+        $receipt = $this->database->fetchOne('SELECT r.*, o.public_id AS order_public_id, o.status AS order_status FROM payment_receipts r JOIN orders o ON o.id = r.order_id WHERE r.public_id = ?', [$params['id']]);
+        if ($receipt === null) throw new ApiException('RECEIPT_NOT_FOUND', 'The payment receipt was not found.', 404);
+        if ($receipt['status'] !== 'submitted') throw new ApiException('RECEIPT_ALREADY_REVIEWED', 'This receipt has already been reviewed.', 409);
+        $status = (string) $input['status'];
+        $now = Security::now();
+        if ($status === 'verified') {
+            $this->orders->updateByAdmin((int) $receipt['order_id'], ['status' => 'payment_confirmed', 'paymentStatus' => 'confirmed'], $context?->userId());
+        }
+        $this->database->execute('UPDATE payment_receipts SET status = ?, review_note = ?, reviewed_by = ?, reviewed_at = ?, updated_at = ? WHERE id = ? AND status = ?', [$status, $input['reviewNote'] ?? null, $context?->userId(), $now, $now, $receipt['id'], 'submitted']);
+        $this->audit->log($context, $request, 'payment_receipt.' . $status, 'order', (string) $receipt['order_public_id'], ['receiptId' => $params['id']], ['status' => $status, 'reviewNote' => $input['reviewNote'] ?? null]);
+        $saved = $this->database->fetchOne('SELECT r.*, m.display_name AS payment_method_name FROM payment_receipts r JOIN payment_methods m ON m.id = r.payment_method_id WHERE r.id = ?', [$receipt['id']]);
+        return Response::success(['receipt' => $this->mapReceipt($saved ?? []), 'order' => $this->orders->getOrder((int) $receipt['order_id'])]);
+    }
+
     public function settings(Request $request, array $params, ?AuthContext $context): Response
     {
-        return Response::success(['settings' => $this->store->settings(false)]);
+        $settings = $this->store->settings(false);
+        $settings['paymentMethods'] = $this->store->paymentMethods(false);
+        return Response::success(['settings' => $settings]);
     }
 
     public function updateSettings(Request $request, array $params, ?AuthContext $context): Response
     {
         $input = $request->json();
-        $allowed = ['storeName', 'supportEmail', 'whatsappDisplay', 'whatsappNumber', 'instagramHandle', 'instagramUrl', 'facebookUrl', 'announcement', 'shippingThreshold', 'shippingFee', 'currency', 'country'];
+        $allowed = ['storeName', 'supportEmail', 'whatsappDisplay', 'whatsappNumber', 'instagramHandle', 'instagramUrl', 'facebookUrl', 'announcement', 'shippingThreshold', 'shippingFee', 'currency', 'country', 'paymentMethods'];
         $unknown = array_diff(array_keys($input), $allowed);
         if ($unknown !== []) {
             throw new ApiException('VALIDATION_FAILED', 'One or more settings are not supported.', 422, ['settings' => 'Unsupported: ' . implode(', ', $unknown)]);
@@ -396,6 +516,7 @@ final class AdminController
             'whatsappNumber' => 'sometimes|string|max:30', 'instagramHandle' => 'sometimes|string|max:80', 'instagramUrl' => 'sometimes|string|max:500',
             'facebookUrl' => 'sometimes|string|max:500', 'announcement' => 'sometimes|string|max:255', 'shippingThreshold' => 'sometimes|numeric',
             'shippingFee' => 'sometimes|numeric', 'currency' => 'sometimes|string|max:3', 'country' => 'sometimes|string|max:100',
+            'paymentMethods' => 'sometimes|array',
         ]);
         if (isset($input['whatsappNumber']) && !preg_match('/^\d{8,20}$/', (string) $input['whatsappNumber'])) {
             throw new ApiException('VALIDATION_FAILED', 'Please correct the highlighted fields.', 422, ['whatsappNumber' => 'Use digits only, including country code.']);
@@ -416,15 +537,26 @@ final class AdminController
         }
         $before = $this->store->settings(false);
         $now = Security::now();
-        $this->database->transaction(function () use ($input, $context, $now): void {
+        $paymentMethods = array_key_exists('paymentMethods', $input) ? $this->normalizePaymentMethods((array) $input['paymentMethods']) : null;
+        unset($input['paymentMethods']);
+        $this->database->transaction(function () use ($input, $paymentMethods, $context, $now): void {
             foreach ($input as $key => $value) {
                 $updated = $this->database->execute('UPDATE settings SET value_json = ?, is_public = 1, updated_by = ?, updated_at = ? WHERE setting_key = ?', [Security::jsonEncode($value), $context?->userId(), $now, $key]);
                 if ($updated === 0) {
                     $this->database->execute('INSERT INTO settings (setting_key, value_json, is_public, updated_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)', [$key, Security::jsonEncode($value), 1, $context?->userId(), $now, $now]);
                 }
             }
+            if ($paymentMethods !== null) {
+                foreach ($paymentMethods as $method) {
+                    $updated = $this->database->execute('UPDATE payment_methods SET method_type = ?, display_name = ?, is_active = ?, instructions = ?, qr_image_url = ?, bank_name = ?, account_name = ?, account_number = ?, sort_order = ?, updated_at = ? WHERE id = ?', [$method['type'], $method['name'], $method['active'] ? 1 : 0, $method['instructions'], $method['qrImage'], $method['bankName'], $method['accountName'], $method['accountNumber'], $method['sortOrder'], $now, $method['id']]);
+                    if ($updated === 0) {
+                        $this->database->execute('INSERT INTO payment_methods (id, method_type, display_name, is_active, instructions, qr_image_url, bank_name, account_name, account_number, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [$method['id'], $method['type'], $method['name'], $method['active'] ? 1 : 0, $method['instructions'], $method['qrImage'], $method['bankName'], $method['accountName'], $method['accountNumber'], $method['sortOrder'], $now, $now]);
+                    }
+                }
+            }
         });
         $after = $this->store->settings(false);
+        $after['paymentMethods'] = $this->store->paymentMethods(false);
         $this->audit->log($context, $request, 'settings.updated', 'settings', 'store', $before, $after);
 
         return Response::success(['settings' => $after]);
@@ -1216,6 +1348,54 @@ final class AdminController
         ) {
             throw new ApiException('VALIDATION_FAILED', 'Please correct the highlighted fields.', 422, [$field => 'Enter an approved HTTPS URL.']);
         }
+    }
+
+    /** @param list<mixed> $permissions @return list<string> */
+    private function normalizeStaffPermissions(array $permissions): array
+    {
+        $allowed = ['dashboard', 'orders', 'customers', 'content', 'promos', 'enquiries'];
+        $normalized = array_values(array_unique(array_map('strval', $permissions)));
+        if (array_diff($normalized, $allowed) !== []) {
+            throw new ApiException('VALIDATION_FAILED', 'Choose only supported staff permissions.', 422, ['permissions' => 'One or more permissions are not supported.']);
+        }
+        return $normalized;
+    }
+
+    /** @param array<string,mixed> $row @return array<string,mixed> */
+    private function mapStaff(array $row): array
+    {
+        return ['id' => (string) ($row['public_id'] ?? ''), 'username' => (string) ($row['username'] ?? ''), 'email' => $row['email'] ?? null, 'fullName' => (string) (($row['display_name'] ?? null) ?: trim((string) ($row['first_name'] ?? '') . ' ' . (string) ($row['last_name'] ?? ''))), 'status' => (string) ($row['status'] ?? 'disabled'), 'permissions' => Security::jsonDecode($row['permissions_json'] ?? null, []), 'mustChangePassword' => (bool) ($row['must_change_password'] ?? false), 'lastLoginAt' => $row['last_login_at'] ?? null, 'createdAt' => $row['created_at'] ?? null];
+    }
+
+    /** @param list<mixed> $methods @return list<array<string,mixed>> */
+    private function normalizePaymentMethods(array $methods): array
+    {
+        if (count($methods) > 12) throw new ApiException('VALIDATION_FAILED', 'You can configure up to 12 payment methods.', 422);
+        $normalized = [];
+        foreach ($methods as $index => $method) {
+            if (!is_array($method)) throw new ApiException('VALIDATION_FAILED', 'Each payment method must be complete.', 422, ['paymentMethods.' . $index => 'Invalid payment method.']);
+            $type = (string) ($method['type'] ?? '');
+            if (!in_array($type, ['duitnow_qr', 'tng_qr', 'bank_transfer'], true)) throw new ApiException('VALIDATION_FAILED', 'Choose a supported payment method.', 422, ['paymentMethods.' . $index . '.type' => 'Choose DuitNow QR, Touch n Go QR or bank transfer.']);
+            $id = preg_replace('/[^a-z0-9_-]/', '-', strtolower((string) ($method['id'] ?? $type))) ?: $type;
+            $name = trim((string) ($method['name'] ?? ''));
+            if ($name === '' || mb_strlen($name) > 120) throw new ApiException('VALIDATION_FAILED', 'Enter a payment method name.', 422, ['paymentMethods.' . $index . '.name' => 'Required.']);
+            $active = !empty($method['active']);
+            $qrImage = trim((string) ($method['qrImage'] ?? '')) ?: null;
+            if ($qrImage !== null) $this->assertSafeImageUrl($qrImage, 'paymentMethods.' . $index . '.qrImage');
+            $bankName = trim((string) ($method['bankName'] ?? '')) ?: null;
+            $accountName = trim((string) ($method['accountName'] ?? '')) ?: null;
+            $accountNumber = trim((string) ($method['accountNumber'] ?? '')) ?: null;
+            if ($active && in_array($type, ['duitnow_qr', 'tng_qr'], true) && $qrImage === null) throw new ApiException('VALIDATION_FAILED', 'Upload a QR image before enabling this payment method.', 422, ['paymentMethods.' . $index . '.qrImage' => 'QR image required.']);
+            if ($active && $type === 'bank_transfer' && (!$bankName || !$accountName || !$accountNumber)) throw new ApiException('VALIDATION_FAILED', 'Complete the bank details before enabling bank transfer.', 422, ['paymentMethods.' . $index => 'Bank name, account name and number are required.']);
+            $normalized[] = ['id' => mb_substr($id, 0, 64), 'type' => $type, 'name' => $name, 'active' => $active, 'instructions' => trim((string) ($method['instructions'] ?? '')) ?: null, 'qrImage' => $qrImage, 'bankName' => $bankName, 'accountName' => $accountName, 'accountNumber' => $accountNumber, 'sortOrder' => (int) ($method['sortOrder'] ?? $index)];
+        }
+        return $normalized;
+    }
+
+    /** @param array<string,mixed> $row @return array<string,mixed> */
+    private function mapReceipt(array $row): array
+    {
+        return ['id' => (string) ($row['public_id'] ?? ''), 'status' => (string) ($row['status'] ?? ''), 'paymentMethodId' => (string) ($row['payment_method_id'] ?? ''), 'paymentMethodName' => (string) ($row['payment_method_name'] ?? ''), 'customerReference' => $row['customer_reference'] ?? null, 'customerNote' => $row['customer_note'] ?? null, 'originalName' => (string) ($row['original_name'] ?? ''), 'mimeType' => (string) ($row['mime_type'] ?? ''), 'sizeBytes' => (int) ($row['size_bytes'] ?? 0), 'reviewNote' => $row['review_note'] ?? null, 'createdAt' => $row['created_at'] ?? null, 'reviewedAt' => $row['reviewed_at'] ?? null];
     }
 
     private function assertSafeImageUrl(string $url, string $field): void

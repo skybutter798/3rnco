@@ -120,7 +120,22 @@ final class StoreRepository
             'slides' => array_map([$this, 'slide'], $this->database->fetchAll('SELECT * FROM slides WHERE is_active = 1 ORDER BY sort_order, id')),
             'gallery' => array_map([$this, 'galleryItem'], $this->database->fetchAll('SELECT * FROM gallery_items WHERE is_active = 1 ORDER BY sort_order, id')),
             'bundles' => $this->bundles(true),
+            'paymentMethods' => $this->paymentMethods(true),
         ];
+    }
+
+    /** @return list<array<string, mixed>> */
+    public function paymentMethods(bool $activeOnly = false): array
+    {
+        $rows = $this->database->fetchAll('SELECT * FROM payment_methods' . ($activeOnly ? ' WHERE is_active = 1' : '') . ' ORDER BY sort_order, id');
+
+        return array_map(static fn (array $row): array => [
+            'id' => (string) $row['id'], 'type' => (string) $row['method_type'], 'name' => (string) $row['display_name'],
+            'active' => (bool) $row['is_active'], 'instructions' => (string) ($row['instructions'] ?? ''),
+            'qrImage' => $row['qr_image_url'] ?? null, 'bankName' => $row['bank_name'] ?? null,
+            'accountName' => $row['account_name'] ?? null, 'accountNumber' => $row['account_number'] ?? null,
+            'sortOrder' => (int) $row['sort_order'],
+        ], $rows);
     }
 
     /** @return array<string, mixed> */
@@ -559,6 +574,7 @@ final class OrderService
     public function mapOrder(array $row): array
     {
         $lines = $this->database->fetchAll('SELECT * FROM order_items WHERE order_id = ? ORDER BY id', [$row['id']]);
+        $receipt = $this->database->fetchOne('SELECT r.*, m.display_name AS payment_method_name, m.method_type FROM payment_receipts r JOIN payment_methods m ON m.id = r.payment_method_id WHERE r.order_id = ? ORDER BY r.created_at DESC, r.id DESC LIMIT 1', [$row['id']]);
         return [
             'id' => (string) $row['public_id'],
             'orderNumber' => (string) $row['order_number'],
@@ -577,6 +593,14 @@ final class OrderService
             'inventoryReservedUntil' => $row['inventory_reserved_until'] ?? null,
             'shippingAddress' => Security::jsonDecode((string) $row['shipping_address_json'], []),
             'bundleMetadata' => Security::jsonDecode($row['bundle_metadata_json'] ?? null),
+            'paymentReceipt' => $receipt === null ? null : [
+                'id' => (string) $receipt['public_id'], 'status' => (string) $receipt['status'],
+                'paymentMethodId' => (string) $receipt['payment_method_id'], 'paymentMethodName' => (string) $receipt['payment_method_name'],
+                'customerReference' => $receipt['customer_reference'], 'customerNote' => $receipt['customer_note'],
+                'originalName' => (string) $receipt['original_name'], 'mimeType' => (string) $receipt['mime_type'],
+                'sizeBytes' => (int) $receipt['size_bytes'], 'reviewNote' => $receipt['review_note'],
+                'createdAt' => (string) $receipt['created_at'], 'reviewedAt' => $receipt['reviewed_at'],
+            ],
             'lines' => array_map(static fn (array $line): array => [
                 'id' => (string) $line['id'], 'productId' => (string) $line['product_id'], 'name' => (string) $line['product_name'],
                 'quantity' => (int) $line['quantity'], 'unitPrice' => ((int) $line['unit_price_cents']) / 100,
@@ -1015,5 +1039,83 @@ final class UploadService
         }
 
         return ['id' => $publicId, 'deleted' => true];
+    }
+}
+
+final class PaymentReceiptService
+{
+    public function __construct(private readonly Config $config, private readonly Database $database)
+    {
+    }
+
+    /** @param array<string, mixed> $file @return array<string, mixed> */
+    public function store(array $file, int $orderId, int $customerId, string $paymentMethodId, ?string $reference, ?string $note): array
+    {
+        $error = (int) ($file['error'] ?? UPLOAD_ERR_NO_FILE);
+        if (in_array($error, [UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE], true)) {
+            throw new ApiException('RECEIPT_TOO_LARGE', 'The receipt exceeds the server upload limit.', 413);
+        }
+        if ($error !== UPLOAD_ERR_OK || !isset($file['tmp_name'], $file['name'], $file['size'])) {
+            throw new ApiException('RECEIPT_UPLOAD_FAILED', 'The receipt upload did not complete.', 422);
+        }
+        $size = (int) $file['size'];
+        if ($size < 1 || $size > $this->config->int('receipt.max_bytes')) {
+            throw new ApiException('RECEIPT_TOO_LARGE', 'Receipts must be 8 MB or smaller.', 413);
+        }
+        $temporary = (string) $file['tmp_name'];
+        $mime = (string) (new \finfo(FILEINFO_MIME_TYPE))->file($temporary);
+        $extensions = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/webp' => 'webp', 'application/pdf' => 'pdf'];
+        if (!isset($extensions[$mime])) {
+            throw new ApiException('RECEIPT_TYPE_NOT_ALLOWED', 'Upload a JPEG, PNG, WebP or PDF receipt.', 422);
+        }
+        $root = $this->config->string('receipt.dir');
+        if (!is_dir($root) && !mkdir($root, 0700, true) && !is_dir($root)) {
+            throw new ApiException('RECEIPT_STORAGE_UNAVAILABLE', 'Private receipt storage is unavailable.', 500);
+        }
+        chmod($root, 0700);
+        $storedName = gmdate('Y/m') . '/' . bin2hex(random_bytes(20)) . '.' . $extensions[$mime];
+        $target = $root . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $storedName);
+        if (!is_dir(dirname($target)) && !mkdir(dirname($target), 0700, true) && !is_dir(dirname($target))) {
+            throw new ApiException('RECEIPT_STORAGE_UNAVAILABLE', 'Private receipt storage is unavailable.', 500);
+        }
+        chmod(dirname($target), 0700);
+        if (!move_uploaded_file($temporary, $target)) {
+            throw new ApiException('RECEIPT_UPLOAD_FAILED', 'The receipt could not be stored.', 500);
+        }
+        chmod($target, 0600);
+        $publicId = Security::uuid();
+        $now = Security::now();
+        try {
+            $this->database->execute(
+                'INSERT INTO payment_receipts (public_id, order_id, customer_id, payment_method_id, storage_key, original_name, mime_type, size_bytes, sha256, customer_reference, customer_note, status, review_note, reviewed_by, reviewed_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                [$publicId, $orderId, $customerId, $paymentMethodId, $storedName, mb_substr(basename((string) $file['name']), 0, 255), $mime, $size, hash_file('sha256', $target), $reference, $note, 'submitted', null, null, null, $now, $now],
+            );
+        } catch (\Throwable $exception) {
+            @unlink($target);
+            throw $exception;
+        }
+
+        return ['id' => $publicId, 'status' => 'submitted', 'paymentMethodId' => $paymentMethodId, 'customerReference' => $reference, 'customerNote' => $note, 'originalName' => basename((string) $file['name']), 'mimeType' => $mime, 'sizeBytes' => $size, 'createdAt' => $now];
+    }
+
+    /** @return array<string, mixed> */
+    public function file(string $publicId): array
+    {
+        $row = $this->database->fetchOne('SELECT * FROM payment_receipts WHERE public_id = ?', [$publicId]);
+        if ($row === null) {
+            throw new ApiException('RECEIPT_NOT_FOUND', 'The payment receipt was not found.', 404);
+        }
+        $root = realpath($this->config->string('receipt.dir'));
+        $path = $this->config->string('receipt.dir') . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, (string) $row['storage_key']);
+        $resolved = realpath($path);
+        if ($root === false || $resolved === false || !str_starts_with($resolved, $root . DIRECTORY_SEPARATOR) || !is_file($resolved)) {
+            throw new ApiException('RECEIPT_FILE_NOT_FOUND', 'The receipt file is unavailable.', 404);
+        }
+        $bytes = file_get_contents($resolved);
+        if ($bytes === false) {
+            throw new ApiException('RECEIPT_FILE_UNAVAILABLE', 'The receipt file could not be read.', 500);
+        }
+
+        return ['bytes' => $bytes, 'mimeType' => (string) $row['mime_type'], 'originalName' => (string) $row['original_name']];
     }
 }

@@ -371,6 +371,9 @@ export async function seedProductionDatabase(db: D1Database): Promise<void> {
     db.prepare(
       "INSERT OR IGNORE INTO inventory_locations (id, name, active) VALUES ('location-main', 'Main stock', 1)",
     ),
+    db.prepare("INSERT OR IGNORE INTO payment_methods (id, method_type, display_name, enabled, instructions, sort_order) VALUES ('duitnow-qr', 'duitnow_qr', 'DuitNow QR', 0, 'Complete the transfer, then upload your receipt from My account.', 0)"),
+    db.prepare("INSERT OR IGNORE INTO payment_methods (id, method_type, display_name, enabled, instructions, sort_order) VALUES ('touch-n-go-qr', 'tng_qr', 'Touch ''n Go eWallet QR', 0, 'Complete the transfer, then upload your receipt from My account.', 1)"),
+    db.prepare("INSERT OR IGNORE INTO payment_methods (id, method_type, display_name, enabled, instructions, sort_order) VALUES ('bank-transfer', 'bank_transfer', 'Bank transfer', 0, 'Complete the transfer, then upload your receipt from My account.', 2)"),
     db.prepare(`INSERT OR IGNORE INTO bundles
       (id, slug, name, title, cta_label, description, selection_mode, pricing_mode, status, sort_order)
       VALUES ('two-step-set', 'two-step-set', 'Build the two-step set', 'Choose two textures. Make it yours.', 'Build the two-step set',

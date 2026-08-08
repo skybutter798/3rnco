@@ -105,7 +105,7 @@ $app = new App($config, $database);
 $cookieName = $config->string('session.cookie');
 
 test('SQLite migration applies once and is idempotent', function () use ($applied, $migrator): void {
-    assertSameValue(['001_schema'], $applied);
+    assertSameValue(['001_schema', '002_staff_payments'], $applied);
     assertSameValue([], $migrator->migrate());
 });
 
@@ -118,6 +118,9 @@ test('seed preserves content and starts operational tables empty', function () u
     assertSameValue(0, (int) $database->fetchOne("SELECT COUNT(*) AS aggregate FROM users WHERE role = 'customer'")['aggregate']);
     assertSameValue(0, (int) $database->fetchOne('SELECT COUNT(*) AS aggregate FROM promos')['aggregate']);
     assertSameValue(0, (int) $database->fetchOne('SELECT COUNT(*) AS aggregate FROM enquiries')['aggregate']);
+    assertSameValue(0, (int) $database->fetchOne('SELECT COUNT(*) AS aggregate FROM staff_profiles')['aggregate']);
+    assertSameValue(0, (int) $database->fetchOne('SELECT COUNT(*) AS aggregate FROM payment_receipts')['aggregate']);
+    assertSameValue(3, (int) $database->fetchOne('SELECT COUNT(*) AS aggregate FROM payment_methods')['aggregate']);
     assertSameValue(0, (int) $database->fetchOne('SELECT SUM(stock_quantity) AS aggregate FROM products')['aggregate']);
     assertSameValue(4, $firstSeed['products']);
     assertSameValue(0, $secondSeed['products']);
@@ -231,6 +234,15 @@ test('admin can update inventory and settings after securing account', function 
     assertSameValue(200, $settings->status);
     $unsafe = callApi($app, 'PATCH', '/api/v1/admin/settings', ['instagramUrl' => 'javascript://alert.example/x'], ['X-CSRF-Token' => $adminSession['csrf']], [$cookieName => $adminSession['cookie']]);
     assertSameValue(422, $unsafe->status);
+});
+
+test('owner can create staff access without exposing the password', function () use ($app, $cookieName, &$adminSession): void {
+    $created = callApi($app, 'POST', '/api/v1/admin/staff', ['username' => 'orders.team', 'fullName' => 'Orders Team', 'email' => 'orders@example.test', 'password' => 'staff8888', 'permissions' => ['dashboard', 'orders']], ['X-CSRF-Token' => $adminSession['csrf']], [$cookieName => $adminSession['cookie']]);
+    assertSameValue(201, $created->status);
+    assertSameValue('orders.team', $created->body['data']['staff']['username']);
+    assertTrue(!array_key_exists('password', $created->body['data']['staff']));
+    $listed = callApi($app, 'GET', '/api/v1/admin/staff', null, [], [$cookieName => $adminSession['cookie']]);
+    assertSameValue(1, count($listed->body['data']['staff']));
 });
 
 $customerGuest = sessionFrom(callApi($app, 'GET', '/api/v1/auth/session'), $cookieName);
