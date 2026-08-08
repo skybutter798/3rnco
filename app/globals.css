@@ -349,7 +349,7 @@ button:disabled {
 .hero {
   position: relative;
   display: flex;
-  min-height: calc(100svh - 34px);
+  height: max(760px, calc(100svh - 34px));
   align-items: stretch;
   overflow: hidden;
   padding: 122px clamp(24px, 5vw, 84px) 96px;
