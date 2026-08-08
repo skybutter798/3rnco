@@ -22,7 +22,7 @@ Use a newly created, empty production database for the first release. The idempo
 - the four current products with inventory `0`;
 - the three current landing sliders and current social gallery;
 - the official support email, WhatsApp, Instagram and Facebook settings;
-- the configurable **Build the two-step set** definition;
+- the configurable **Build the two-step set** and **Build a gift set** definitions, including optional fixed or percentage set savings;
 - the bootstrap administrator.
 
 Orders, customers, promo codes and enquiries remain empty in that fresh database. Verify those exact zero counts before cutover. The bootstrap administrator is `admin` / `88888888`; every admin mutation is blocked until the password is changed in **Store Settings**. While that known temporary password is active, login and password change are also restricted to the exact deployment-owner IPs in `BOOTSTRAP_ADMIN_IPS`.

@@ -88,6 +88,8 @@ export type Bundle = {
   title?: string;
   description: string;
   active?: boolean;
+  discountType?: "none" | "fixed" | "percentage";
+  discountValue?: number;
   steps: BundleStep[];
 };
 
@@ -175,7 +177,12 @@ export type Enquiry = {
   message: string;
   status: string;
   createdAt: string;
-  replies?: { id?: string; message: string; createdAt: string; author?: string }[];
+  replies?: {
+    id?: string;
+    message: string;
+    createdAt: string;
+    author?: string;
+  }[];
 };
 
 export type StorefrontPayload = {

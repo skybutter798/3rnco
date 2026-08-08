@@ -681,10 +681,10 @@ final class AdminController
             $input['lastName'] = $parts[1] ?? '';
         }
         Validator::requireValid($input, [
-            'email' => 'required|string|email|max:191', 'password' => 'required|string|min:10|max:200', 'firstName' => 'required|string|max:100',
+            'email' => 'required|string|email|max:191', 'password' => 'required|string|min:8|max:200', 'firstName' => 'required|string|max:100',
             'lastName' => 'required|string|max:100', 'phone' => 'sometimes|nullable|string|max:40',
         ]);
-        Validator::password((string) $input['password'], 10);
+        Validator::password((string) $input['password'], 8, false);
         $publicId = Security::uuid();
         $now = Security::now();
         try {
@@ -899,8 +899,20 @@ final class AdminController
     {
         Validator::requireValid($input, [
             'name' => 'required|string|max:180', 'title' => 'sometimes|nullable|string|max:255', 'description' => 'required|string|max:5000',
-            'active' => 'sometimes|bool', 'steps' => 'required|array',
+            'active' => 'sometimes|bool', 'discountType' => 'sometimes|string|in:none,fixed,percentage',
+            'discountValue' => 'sometimes|numeric', 'steps' => 'required|array',
         ]);
+        $discountType = (string) ($input['discountType'] ?? 'none');
+        $discountValue = (float) ($input['discountValue'] ?? 0);
+        if ($discountValue < 0 || ($discountType === 'percentage' && $discountValue > 100)) {
+            throw new ApiException('VALIDATION_FAILED', 'Enter a valid set saving value.', 422, ['discountValue' => $discountType === 'percentage' ? 'Enter 0–100%.' : 'Enter a non-negative amount.']);
+        }
+        $pricingMode = match ($discountType) {
+            'fixed' => 'fixed_discount',
+            'percentage' => 'percentage_discount',
+            default => 'sum',
+        };
+        $priceValueCents = $discountType === 'none' ? null : (int) round($discountValue * 100);
         if (count($input['steps']) < 1 || count($input['steps']) > 10) {
             throw new ApiException('VALIDATION_FAILED', 'A bundle needs between 1 and 10 steps.', 422, ['steps' => 'Add 1–10 steps.']);
         }
@@ -935,16 +947,16 @@ final class AdminController
         }
         $before = $this->store->findBundle($id);
         $now = Security::now();
-        $this->database->transaction(function () use ($id, $input, $steps, $creating, $now): void {
+        $this->database->transaction(function () use ($id, $input, $steps, $creating, $now, $pricingMode, $priceValueCents): void {
             if ($creating) {
                 $this->database->execute(
                     'INSERT INTO bundles (id, name, title, description, pricing_mode, fixed_price_cents, sort_order, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-                    [$id, trim((string) $input['name']), $input['title'] ?? null, trim((string) $input['description']), 'sum', null, 0, !array_key_exists('active', $input) || !empty($input['active']) ? 1 : 0, $now, $now],
+                    [$id, trim((string) $input['name']), $input['title'] ?? null, trim((string) $input['description']), $pricingMode, $priceValueCents, 0, !array_key_exists('active', $input) || !empty($input['active']) ? 1 : 0, $now, $now],
                 );
             } else {
                 $this->database->execute(
-                    'UPDATE bundles SET name = ?, title = ?, description = ?, is_active = ?, updated_at = ? WHERE id = ?',
-                    [trim((string) $input['name']), $input['title'] ?? null, trim((string) $input['description']), !array_key_exists('active', $input) || !empty($input['active']) ? 1 : 0, $now, $id],
+                    'UPDATE bundles SET name = ?, title = ?, description = ?, pricing_mode = ?, fixed_price_cents = ?, is_active = ?, updated_at = ? WHERE id = ?',
+                    [trim((string) $input['name']), $input['title'] ?? null, trim((string) $input['description']), $pricingMode, $priceValueCents, !array_key_exists('active', $input) || !empty($input['active']) ? 1 : 0, $now, $id],
                 );
                 $this->database->execute('DELETE FROM bundle_step_products WHERE step_id IN (SELECT id FROM bundle_steps WHERE bundle_id = ?)', [$id]);
                 $this->database->execute('DELETE FROM bundle_steps WHERE bundle_id = ?', [$id]);

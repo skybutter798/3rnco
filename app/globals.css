@@ -2605,23 +2605,33 @@ button:disabled {
   right: 22px;
   bottom: 22px;
   display: flex;
-  height: 50px;
+  min-width: 176px;
+  height: 62px;
   align-items: center;
-  gap: 9px;
-  padding: 0 18px;
-  border: 0;
-  border-radius: 999px;
-  background: #4f5f47;
-  box-shadow: 0 15px 35px rgba(40, 50, 35, 0.24);
-  color: white;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.05em;
+  gap: 10px;
+  padding: 6px 16px 6px 7px;
+  border: 1px solid rgba(54, 68, 49, 0.2);
+  border-radius: 31px 31px 9px 31px;
+  background: rgba(248, 244, 235, 0.96);
+  box-shadow: 0 17px 42px rgba(35, 45, 31, 0.2);
+  color: var(--umber);
+  text-align: left;
+  backdrop-filter: blur(14px);
+  transition: transform 0.25s ease, box-shadow 0.25s ease;
 }
 
+.whatsapp-fab:hover { box-shadow: 0 20px 48px rgba(35, 45, 31, 0.27); transform: translateY(-2px); }
+.whatsapp-fab__mark { position: relative; display: grid; width: 48px; height: 48px; flex: 0 0 auto; place-items: center; border: 1px solid rgba(54, 68, 49, 0.12); border-radius: 50%; background: white; }
+.whatsapp-fab__mark .brand-mark { width: 34px; }
+.whatsapp-fab__mark .brand-mark__image { width: 34px; height: auto; }
+.whatsapp-fab__leaf { position: absolute; right: -3px; bottom: -2px; width: 18px; height: 18px; padding: 4px; border-radius: 50%; background: var(--olive); color: white; transform: rotate(-18deg); }
+.whatsapp-fab__copy { display: grid; gap: 1px; }
+.whatsapp-fab__copy b { font-family: var(--font-display); font-size: 17px; font-weight: 500; letter-spacing: -0.02em; }
+.whatsapp-fab__copy small { color: rgba(45, 40, 36, 0.58); font-size: 8px; font-weight: 800; letter-spacing: 0.14em; text-transform: uppercase; }
 .whatsapp-fab--open {
   z-index: 96;
 }
+.whatsapp-fab--open .whatsapp-fab__mark { background: var(--olive); color: white; }
 
 .whatsapp-panel {
   position: fixed;
@@ -4524,14 +4534,18 @@ button:disabled {
   .whatsapp-fab {
     right: 14px;
     bottom: 14px;
-    width: 48px;
+    min-width: 0;
+    width: 58px;
+    height: 58px;
     justify-content: center;
     padding: 0;
   }
 
-  .whatsapp-fab span {
+  .whatsapp-fab__copy {
     display: none;
   }
+
+  .whatsapp-fab__mark { width: 46px; height: 46px; }
 
   .whatsapp-panel {
     right: 8px;

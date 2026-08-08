@@ -113,7 +113,7 @@ test('seed preserves content and starts operational tables empty', function () u
     assertSameValue(4, (int) $database->fetchOne('SELECT COUNT(*) AS aggregate FROM products')['aggregate']);
     assertSameValue(3, (int) $database->fetchOne('SELECT COUNT(*) AS aggregate FROM slides')['aggregate']);
     assertSameValue(11, (int) $database->fetchOne('SELECT COUNT(*) AS aggregate FROM gallery_items')['aggregate']);
-    assertSameValue(1, (int) $database->fetchOne('SELECT COUNT(*) AS aggregate FROM bundles')['aggregate']);
+    assertSameValue(2, (int) $database->fetchOne('SELECT COUNT(*) AS aggregate FROM bundles')['aggregate']);
     assertSameValue(0, (int) $database->fetchOne('SELECT COUNT(*) AS aggregate FROM orders')['aggregate']);
     assertSameValue(0, (int) $database->fetchOne("SELECT COUNT(*) AS aggregate FROM users WHERE role = 'customer'")['aggregate']);
     assertSameValue(0, (int) $database->fetchOne('SELECT COUNT(*) AS aggregate FROM promos')['aggregate']);
@@ -143,7 +143,7 @@ test('storefront contract contains current content and exact bundle shape', func
     assertTrue(is_int($data['products'][0]['price']) || is_float($data['products'][0]['price']), 'MYR price must be numeric');
     assertSameValue(0, $data['products'][0]['stock']);
     $bundle = $data['bundles'][0];
-    assertSameValue(['id', 'name', 'title', 'description', 'active', 'steps'], array_keys($bundle));
+    assertSameValue(['id', 'name', 'title', 'description', 'active', 'discountType', 'discountValue', 'steps'], array_keys($bundle));
     assertSameValue(['id', 'label', 'description', 'productIds', 'minSelections', 'maxSelections', 'sortOrder'], array_keys($bundle['steps'][0]));
     assertSameValue(['body-cream', 'tree-body-oil'], $bundle['steps'][1]['productIds']);
 });
@@ -235,13 +235,13 @@ test('admin can update inventory and settings after securing account', function 
 
 $customerGuest = sessionFrom(callApi($app, 'GET', '/api/v1/auth/session'), $cookieName);
 
-test('registration rejects missing CSRF and passwords shorter than ten characters', function () use ($app, $database, $cookieName, &$customerGuest): void {
+test('registration rejects missing CSRF and passwords shorter than eight characters', function () use ($app, $database, $cookieName, &$customerGuest): void {
     $body = ['fullName' => 'Blocked Customer', 'email' => 'blocked@example.test', 'phone' => '+6011222333', 'password' => 'Customer123'];
     $missingCsrf = callApi($app, 'POST', '/api/v1/auth/register', $body, [], [$cookieName => $customerGuest['cookie']]);
     assertSameValue(419, $missingCsrf->status);
     assertSameValue('CSRF_TOKEN_INVALID', $missingCsrf->body['error']['code']);
 
-    $body['password'] = 'Short1abc';
+    $body['password'] = 'Short12';
     $weak = callApi($app, 'POST', '/api/v1/auth/register', $body, ['X-CSRF-Token' => $customerGuest['csrf']], [$cookieName => $customerGuest['cookie']]);
     assertSameValue(422, $weak->status);
     assertSameValue(0, (int) $database->fetchOne("SELECT COUNT(*) AS aggregate FROM users WHERE email = 'blocked@example.test'")['aggregate']);
@@ -249,7 +249,7 @@ test('registration rejects missing CSRF and passwords shorter than ten character
 
 test('customer can register, manage full profile and address', function () use ($app, $cookieName, &$customerGuest, &$customerSession): void {
     $registered = callApi($app, 'POST', '/api/v1/auth/register', [
-        'fullName' => 'Alya Test', 'email' => 'alya@example.test', 'phone' => '+6011222333', 'password' => 'Customer123',
+        'fullName' => 'Alya Test', 'email' => 'alya@example.test', 'phone' => '+6011222333', 'password' => '!!!!!!!!',
     ], ['X-CSRF-Token' => $customerGuest['csrf']], [$cookieName => $customerGuest['cookie']]);
     assertSameValue(201, $registered->status);
     $customerSession = sessionFrom($registered, $cookieName);
@@ -306,6 +306,7 @@ test('promo CRUD and validation use server-side product prices', function () use
 });
 
 test('canonical bundle order reserves stock and expiry restores inventory and promo once', function () use ($app, $config, $database, $cookieName, &$adminSession, &$customerSession): void {
+    $database->execute("UPDATE bundles SET pricing_mode = 'fixed_discount', fixed_price_cents = 500 WHERE id = 'two-step'");
     foreach (['body-cream' => 1, 'champion-soap' => 0] as $productId => $expectedStock) {
         $stocked = callApi($app, 'PATCH', '/api/v1/admin/products/' . $productId, ['stock' => 1, 'expectedStock' => $expectedStock], ['X-CSRF-Token' => $adminSession['csrf']], [$cookieName => $adminSession['cookie']]);
         assertSameValue(200, $stocked->status);
@@ -329,6 +330,8 @@ test('canonical bundle order reserves stock and expiry restores inventory and pr
     $created = callApi($app, 'POST', '/api/v1/orders', $body, ['X-CSRF-Token' => $customerSession['csrf'], 'Idempotency-Key' => 'bundle-order-key-0001'], [$cookieName => $customerSession['cookie']]);
     assertSameValue(201, $created->status);
     assertSameValue('two-step', $created->body['data']['order']['bundleMetadata']['groups'][0]['bundleId']);
+    assertSameValue(17.6, $created->body['data']['order']['discount']);
+    assertSameValue(1260, (int) $database->fetchOne("SELECT discount_cents FROM promo_redemptions r JOIN promos p ON p.id = r.promo_id WHERE p.code = 'TEST10' ORDER BY r.id DESC LIMIT 1")['discount_cents']);
     assertTrue($created->body['data']['order']['inventoryReservedUntil'] !== null);
     assertSameValue(1, (int) $database->fetchOne("SELECT use_count FROM promos WHERE code = 'TEST10'")['use_count']);
 

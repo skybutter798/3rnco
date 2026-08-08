@@ -250,6 +250,12 @@ final class StoreRepository
             'title' => (string) ($row['title'] ?? ''),
             'description' => (string) ($row['description'] ?? ''),
             'active' => (bool) $row['is_active'],
+            'discountType' => match ((string) ($row['pricing_mode'] ?? 'sum')) {
+                'fixed_discount' => 'fixed',
+                'percentage_discount' => 'percentage',
+                default => 'none',
+            },
+            'discountValue' => $row['fixed_price_cents'] === null ? 0 : ((int) $row['fixed_price_cents']) / 100,
             'steps' => $mappedSteps,
         ];
     }
@@ -339,14 +345,16 @@ final class OrderService
                 }
                 [$lines, $subtotal] = $this->pricedItems($items, true);
                 $normalizedBundle = $this->validateBundleMetadata($bundleMetadata, $lines);
+                $bundleDiscount = $this->bundleDiscount($normalizedBundle, $lines);
                 $shipping = $this->shippingFor($subtotal);
                 $promo = null;
-                $discount = 0;
+                $promoDiscount = 0;
                 if (!empty($input['promoCode'])) {
                     $promo = $this->promoFor((string) $input['promoCode'], $subtotal, $shipping, (int) $context->userId(), true);
-                    $discount = (int) $promo['discount_cents'];
+                    $promoDiscount = (int) $promo['discount_cents'];
                     $shipping = (int) $promo['shipping_cents'];
                 }
+                $discount = min($subtotal, $bundleDiscount + $promoDiscount);
                 $total = max(0, $subtotal - $discount + $shipping);
                 $user = $this->database->fetchOne('SELECT email, first_name, last_name, phone FROM users WHERE id = ?', [$context->userId()]);
                 if ($user === null) {
@@ -398,7 +406,7 @@ final class OrderService
                 if ($promo !== null) {
                     $this->database->execute(
                         'INSERT INTO promo_redemptions (promo_id, order_id, user_id, discount_cents, created_at) VALUES (?, ?, ?, ?, ?)',
-                        [$promo['id'], $orderId, $context->userId(), $discount, $now],
+                        [$promo['id'], $orderId, $context->userId(), $promoDiscount, $now],
                     );
                     $this->database->execute('UPDATE promos SET use_count = use_count + 1, updated_at = ? WHERE id = ?', [$now, $promo['id']]);
                 }
@@ -742,6 +750,8 @@ final class OrderService
             $normalized[] = [
                 'bundleId' => $bundle['id'],
                 'groupId' => $groupId,
+                'discountType' => $bundle['discountType'] ?? 'none',
+                'discountValue' => (float) ($bundle['discountValue'] ?? 0),
                 'selections' => array_map(static fn (array $step): array => ['stepId' => $step['id'], 'productIds' => $selectionsByStep[$step['id']] ?? []], $bundle['steps']),
             ];
         }
@@ -752,6 +762,33 @@ final class OrderService
         }
 
         return ['groups' => $normalized];
+    }
+
+    /** @param array<string,mixed>|null $metadata @param list<array<string,mixed>> $lines */
+    private function bundleDiscount(?array $metadata, array $lines): int
+    {
+        $prices = [];
+        foreach ($lines as $line) {
+            $prices[(string) $line['id']] = (int) $line['price_cents'];
+        }
+        $discount = 0;
+        foreach ($metadata['groups'] ?? [] as $group) {
+            $groupSubtotal = 0;
+            foreach ($group['selections'] ?? [] as $selection) {
+                foreach ($selection['productIds'] ?? [] as $productId) {
+                    $groupSubtotal += $prices[(string) $productId] ?? 0;
+                }
+            }
+            $value = max(0.0, (float) ($group['discountValue'] ?? 0));
+            if (($group['discountType'] ?? 'none') === 'fixed') {
+                $discount += min($groupSubtotal, (int) round($value * 100));
+            } elseif (($group['discountType'] ?? 'none') === 'percentage') {
+                $basisPoints = min(10000, (int) round($value * 100));
+                $discount += intdiv($groupSubtotal * $basisPoints, 10000);
+            }
+        }
+
+        return $discount;
     }
 
     /** @param array<string,mixed>|null $metadata @return array<string,string>|null */

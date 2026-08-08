@@ -159,6 +159,40 @@ final class Seeder
             ]);
         }
 
+        $counts['bundles'] += $this->insertIgnore('bundles', [
+            'id' => 'gift-set',
+            'name' => 'Build a gift set',
+            'title' => 'Gather three gestures of care.',
+            'description' => 'Choose a cleansing companion, a nourishing layer, and something to carry close.',
+            'pricing_mode' => 'sum',
+            'fixed_price_cents' => null,
+            'sort_order' => 1,
+            'is_active' => 1,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ]);
+        foreach ([
+            ['gift-cleanse', 'Step one · Cleanse', 'Begin the gift with a grounding cleanse.', 0],
+            ['gift-care', 'Step two · Care', 'Choose a cream or full-size botanical oil.', 1],
+            ['gift-carry', 'Step three · Carry', 'Add a travel ritual for care away from home.', 2],
+        ] as [$stepId, $name, $prompt, $sort]) {
+            $this->insertIgnore('bundle_steps', [
+                'id' => $stepId, 'bundle_id' => 'gift-set', 'name' => $name, 'prompt_text' => $prompt,
+                'min_select' => 1, 'max_select' => 1, 'sort_order' => $sort,
+            ]);
+        }
+        $this->insertIgnore('bundle_step_products', [
+            'step_id' => 'gift-cleanse', 'product_id' => 'champion-soap', 'price_adjustment_cents' => 0, 'is_default' => 1, 'sort_order' => 0,
+        ]);
+        foreach (['body-cream', 'tree-body-oil'] as $sort => $productId) {
+            $this->insertIgnore('bundle_step_products', [
+                'step_id' => 'gift-care', 'product_id' => $productId, 'price_adjustment_cents' => 0, 'is_default' => $sort === 0 ? 1 : 0, 'sort_order' => $sort,
+            ]);
+        }
+        $this->insertIgnore('bundle_step_products', [
+            'step_id' => 'gift-carry', 'product_id' => 'tree-body-oil-travel', 'price_adjustment_cents' => 0, 'is_default' => 1, 'sort_order' => 0,
+        ]);
+
         return $counts;
     }
 

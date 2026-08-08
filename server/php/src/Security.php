@@ -175,16 +175,16 @@ final class Validator
         }
     }
 
-    public static function password(string $password, int $minimum = 8): void
+    public static function password(string $password, int $minimum = 8, bool $requireMixed = true): void
     {
         $errors = [];
         if (mb_strlen($password) < $minimum) {
             $errors[] = sprintf('at least %d characters', $minimum);
         }
-        if (!preg_match('/[A-Za-z]/', $password)) {
+        if ($requireMixed && !preg_match('/[A-Za-z]/', $password)) {
             $errors[] = 'a letter';
         }
-        if (!preg_match('/\d/', $password)) {
+        if ($requireMixed && !preg_match('/\d/', $password)) {
             $errors[] = 'a number';
         }
         if ($errors !== []) {

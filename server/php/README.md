@@ -35,7 +35,7 @@ RNCO_ENV_FILE=/home/rncomy/3rnco_shared/.env \
 php /home/rncomy/3rnco_app/current/scripts/migrate.php --seed
 ```
 
-Migrations are recorded in `schema_migrations` and are idempotent. The initial seed inserts only missing storefront content: four products, three current slides, gallery entries, Store Settings, the two-step set, and the administrator. Stock starts at zero. It does not create customers, orders, promo codes, or enquiries.
+Migrations are recorded in `schema_migrations` and are idempotent. The initial seed inserts only missing storefront content: four products, three current slides, gallery entries, Store Settings, the two-step set, the gift set, and the administrator. Stock starts at zero. It does not create customers, orders, promo codes, or enquiries.
 
 The initial administrator credentials are `admin` / `88888888`. The password is stored only as a password hash and `mustChangePassword` is enabled. Until it is changed, the account may read Store Settings but all other admin access and every admin mutation returns `PASSWORD_CHANGE_REQUIRED`. Change it immediately through `POST /api/v1/auth/change-password`.
 
@@ -52,7 +52,7 @@ Sessions are application-owned and stored in `auth_sessions`; the browser receiv
 
 Calling `/auth/session` again with the same valid cookie returns the same per-session CSRF token, so a second browser tab does not invalidate a form already open in the first tab. Anonymous sessions use the shorter `GUEST_SESSION_TTL_SECONDS` lifetime.
 
-Registration passwords require at least 10 characters, a letter, and a number. Password changes require at least 12 characters, a letter, and a number.
+Customer registration and password changes require any 8 or more characters. Administrator password changes retain the stronger rule of at least 12 characters with a letter and number.
 
 Successful responses use `{ "ok": true, "data": ... }`. Failures use `{ "ok": false, "error": { "code": "...", "message": "...", "fields": ... } }`.
 
@@ -75,7 +75,7 @@ When a product PATCH includes `stock`, it must also include `expectedStock`, the
 
 ## Orders, bundles, and inventory
 
-Order totals, promo discounts, shipping, and product prices are calculated again on the server. Each order requires `paymentMethod: "manual_confirmation"` and an `Idempotency-Key` of 8–128 safe characters. Reusing a key with the same body returns the original order; reusing it with a different body returns `IDEMPOTENCY_CONFLICT`.
+Order totals, automatic fixed/percentage set savings, promo discounts, shipping, and product prices are calculated again on the server. Each order requires `paymentMethod: "manual_confirmation"` and an `Idempotency-Key` of 8–128 safe characters. Reusing a key with the same body returns the original order; reusing it with a different body returns `IDEMPOTENCY_CONFLICT`.
 
 The canonical bundle payload is:
 

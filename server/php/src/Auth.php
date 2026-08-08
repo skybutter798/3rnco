@@ -128,7 +128,7 @@ final class Auth
         }
         Validator::requireValid($input, [
             'email' => 'required|string|email|max:191',
-            'password' => 'required|string|min:10|max:200',
+            'password' => 'required|string|min:8|max:200',
             'firstName' => 'required|string|max:100',
             'lastName' => 'required|string|max:100',
             'phone' => 'required|string|max:40',
@@ -136,7 +136,7 @@ final class Auth
             'dateOfBirth' => 'sometimes|nullable|string|max:10',
             'marketingConsent' => 'sometimes|bool',
         ]);
-        Validator::password((string) $input['password'], 10);
+        Validator::password((string) $input['password'], 8, false);
         $email = Security::normalizeEmail((string) $input['email']);
         if ($this->database->fetchOne('SELECT id FROM users WHERE email = ?', [$email]) !== null) {
             throw new ApiException('EMAIL_ALREADY_REGISTERED', 'An account already exists for this email address.', 409, ['email' => 'Use a different email or sign in.']);
@@ -203,11 +203,12 @@ final class Auth
             throw new ApiException('AUTHENTICATION_REQUIRED', 'Sign in to continue.', 401);
         }
         $this->assertBootstrapAdminNetwork($context->user ?? [], $request);
+        $adminPassword = in_array((string) ($context->user['role'] ?? ''), ['admin', 'superadmin'], true);
         Validator::requireValid($input, [
             'currentPassword' => 'required|string|max:200',
-            'newPassword' => 'required|string|min:12|max:200',
+            'newPassword' => 'required|string|min:' . ($adminPassword ? '12' : '8') . '|max:200',
         ]);
-        Validator::password((string) $input['newPassword'], 12);
+        Validator::password((string) $input['newPassword'], $adminPassword ? 12 : 8, $adminPassword);
         $credentials = $this->database->fetchOne('SELECT password_hash FROM users WHERE id = ?', [$context->userId()]);
         if ($credentials === null || !password_verify((string) $input['currentPassword'], (string) $credentials['password_hash'])) {
             throw new ApiException('CURRENT_PASSWORD_INVALID', 'The current password is incorrect.', 422, ['currentPassword' => 'Check the current password.']);
