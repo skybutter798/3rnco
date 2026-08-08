@@ -166,6 +166,8 @@ test("includes persistent production commerce and clean seed contracts", async (
   assert.match(css, /\.mobile-app-nav/);
   assert.match(css, /\.site-header--solid\s*\{[^}]*top:\s*0;/s);
   assert.match(productionCss, /\.admin-control-grid/);
+  assert.match(productionCss, /--orders-grid:/);
+  assert.match(productionCss, /grid-template-columns:\s*var\(--orders-grid\)/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
   assert.match(packageJson, /cross-env WRANGLER_LOG_PATH/);
 });

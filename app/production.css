@@ -384,7 +384,14 @@
 .admin-control-grid button > strong { overflow: hidden; font-family: var(--font-display); font-size: 21px; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
 .admin-control-grid button > em { overflow: hidden; color: #746d63; font-size: 9px; font-style: normal; text-overflow: ellipsis; white-space: nowrap; }
 .admin-control-grid button > svg { position: absolute; top: 16px; right: 16px; color: #92897c; }
-.admin-orders-table > div { grid-template-columns: 1.05fr 1.35fr 1.7fr 0.8fr 0.9fr 1.05fr; }
+.admin-orders-table {
+  --orders-grid: minmax(0, 1.05fr) minmax(0, 1.35fr) minmax(0, 1.7fr) minmax(0, 0.8fr) minmax(0, 0.9fr) minmax(132px, 1.05fr);
+}
+.admin-orders-table > div {
+  min-width: 980px;
+  grid-template-columns: var(--orders-grid);
+}
+.admin-orders-table > div > span { overflow: hidden; }
 .admin-orders-table select {
   width: 100%;
   min-width: 132px;
