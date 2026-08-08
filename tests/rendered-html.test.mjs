@@ -36,8 +36,11 @@ test("server-renders the current 3R&Co storefront", async () => {
   assert.match(html, /rel="canonical" href="https:\/\/3rnco\.com\.my\/?"/i);
   assert.match(
     html,
-    /property="og:image" content="https:\/\/3rnco\.com\.my\/og-3rnco-moringa-v2\.png"/i,
+    /property="og:image" content="https:\/\/3rnco\.com\.my\/og-3rnco-moringa-1200x630\.jpg"/i,
   );
+  assert.match(html, /property="og:image:width" content="1200"/i);
+  assert.match(html, /property="og:image:height" content="630"/i);
+  assert.match(html, /aria-label="Mobile app navigation"/i);
   assert.match(html, /name="twitter:card" content="summary_large_image"/i);
   assert.match(html, /application\/ld\+json/i);
   assert.match(html, /From moringa,/);
@@ -152,12 +155,15 @@ test("includes persistent production commerce and clean seed contracts", async (
     );
   }
   assert.match(layout, /export const metadata/);
-  assert.match(layout, /\/og-3rnco-moringa-v2\.png/);
+  assert.match(layout, /\/og-3rnco-moringa-1200x630\.jpg/);
+  assert.match(layout, /width:\s*1200/);
+  assert.match(layout, /height:\s*630/);
   assert.match(layout, /alternates:/);
   assert.match(layout, /googleBot:/);
   assert.match(layout, /structuredData/);
   assert.match(css, /prefers-reduced-motion:\s*reduce/);
   assert.match(css, /@media \(max-width: 700px\)/);
+  assert.match(css, /\.mobile-app-nav/);
   assert.match(css, /\.site-header--solid\s*\{[^}]*top:\s*0;/s);
   assert.match(productionCss, /\.admin-control-grid/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);

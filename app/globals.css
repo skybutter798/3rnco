@@ -2886,6 +2886,10 @@ button:disabled {
   animation: drawerIn 0.35s ease both;
 }
 
+.mobile-app-nav {
+  display: none;
+}
+
 .mobile-drawer__close {
   position: absolute;
   top: 25px;
@@ -4158,6 +4162,91 @@ button:disabled {
 }
 
 @media (max-width: 700px) {
+  .mobile-app-nav {
+    position: fixed;
+    z-index: 90;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    min-height: calc(68px + env(safe-area-inset-bottom));
+    padding: 6px 7px calc(6px + env(safe-area-inset-bottom));
+    border-top: 1px solid rgba(28, 37, 29, 0.12);
+    background: rgba(250, 246, 237, 0.94);
+    box-shadow: 0 -12px 35px rgba(28, 37, 29, 0.12);
+    backdrop-filter: blur(18px) saturate(1.25);
+  }
+
+  .mobile-app-nav button {
+    position: relative;
+    display: flex;
+    min-width: 0;
+    min-height: 54px;
+    align-items: center;
+    flex-direction: column;
+    gap: 3px;
+    justify-content: center;
+    padding: 5px 2px;
+    border-radius: 12px;
+    background: transparent;
+    color: rgba(28, 37, 29, 0.52);
+    font-size: 8px;
+    font-weight: 750;
+    letter-spacing: 0.04em;
+  }
+
+  .mobile-app-nav button::before {
+    position: absolute;
+    top: 4px;
+    width: 34px;
+    height: 28px;
+    border-radius: 14px;
+    background: transparent;
+    content: "";
+    transition: background 180ms ease, transform 180ms ease;
+  }
+
+  .mobile-app-nav button svg,
+  .mobile-app-nav button span {
+    position: relative;
+    z-index: 1;
+  }
+
+  .mobile-app-nav button svg {
+    width: 19px;
+    height: 19px;
+    stroke-width: 1.7;
+  }
+
+  .mobile-app-nav button.is-active {
+    color: var(--umber);
+  }
+
+  .mobile-app-nav button.is-active::before {
+    background: rgba(49, 90, 59, 0.13);
+    transform: scaleX(1.12);
+  }
+
+  .mobile-app-nav button > b {
+    position: absolute;
+    z-index: 2;
+    top: 2px;
+    left: calc(50% + 7px);
+    display: grid;
+    min-width: 16px;
+    height: 16px;
+    place-items: center;
+    padding: 0 4px;
+    border: 2px solid var(--paper);
+    border-radius: 999px;
+    background: var(--clay);
+    color: #fff;
+    font-size: 6px;
+  }
+
+  .footer { padding-bottom: calc(98px + env(safe-area-inset-bottom)); }
+
   .top-note {
     justify-content: center;
     font-size: 8px;
@@ -4280,7 +4369,7 @@ button:disabled {
   }
 
   .hero__controls {
-    bottom: 21px;
+    bottom: calc(82px + env(safe-area-inset-bottom));
   }
 
   .hero__media {
@@ -4533,7 +4622,7 @@ button:disabled {
 
   .whatsapp-fab {
     right: 14px;
-    bottom: 14px;
+    bottom: calc(82px + env(safe-area-inset-bottom));
     min-width: 0;
     width: 58px;
     height: 58px;
@@ -4549,7 +4638,7 @@ button:disabled {
 
   .whatsapp-panel {
     right: 8px;
-    bottom: 70px;
+    bottom: calc(142px + env(safe-area-inset-bottom));
     width: calc(100vw - 16px);
   }
 

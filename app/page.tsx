@@ -11,6 +11,7 @@ import {
   ChevronRight,
   CircleUserRound,
   Gift,
+  House,
   Leaf,
   Menu,
   MessageCircle,
@@ -466,6 +467,7 @@ export default function Home() {
   const [sessionChecked, setSessionChecked] = useState(false);
   const [storeError, setStoreError] = useState("");
   const [accountOpen, setAccountOpen] = useState(false);
+  const [mobileSection, setMobileSection] = useState<"home" | "shop" | "sets">("home");
   const [bundleBuilderId, setBundleBuilderId] = useState<string | null>(null);
   const [bundleSelection, setBundleSelection] = useState<{
     bundleId: string;
@@ -1074,6 +1076,30 @@ export default function Home() {
       document.getElementById(id)?.scrollIntoView({ behavior });
     }
   };
+
+  useEffect(() => {
+    if (view !== "store") return;
+    const sections = [
+      ["main-content", "home"],
+      ["collection", "shop"],
+      ["ritual", "sets"],
+    ] as const;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visible = entries
+          .filter((entry) => entry.isIntersecting)
+          .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
+        const match = sections.find(([id]) => id === visible?.target.id);
+        if (match) setMobileSection(match[1]);
+      },
+      { rootMargin: "-18% 0px -58%", threshold: [0, 0.15, 0.35] },
+    );
+    sections.forEach(([id]) => {
+      const element = document.getElementById(id);
+      if (element) observer.observe(element);
+    });
+    return () => observer.disconnect();
+  }, [view]);
 
   const sendWaChoice = (choice: string) => {
     setWaMessages((current) => [...current, { from: "user", text: choice }]);
@@ -1760,6 +1786,59 @@ export default function Home() {
               </div>
             </div>
           </footer>
+          <nav className="mobile-app-nav" aria-label="Mobile app navigation">
+            <button
+              className={!accountOpen && !cartOpen && mobileSection === "home" ? "is-active" : ""}
+              onClick={() => {
+                setMobileSection("home");
+                scrollPageTop();
+              }}
+              aria-current={!accountOpen && !cartOpen && mobileSection === "home" ? "page" : undefined}
+            >
+              <House />
+              <span>Home</span>
+            </button>
+            <button
+              className={!accountOpen && !cartOpen && mobileSection === "shop" ? "is-active" : ""}
+              onClick={() => {
+                setMobileSection("shop");
+                scrollTo("collection");
+              }}
+              aria-current={!accountOpen && !cartOpen && mobileSection === "shop" ? "page" : undefined}
+            >
+              <Leaf />
+              <span>Shop</span>
+            </button>
+            <button
+              className={!accountOpen && !cartOpen && mobileSection === "sets" ? "is-active" : ""}
+              onClick={() => {
+                setMobileSection("sets");
+                scrollTo("ritual");
+              }}
+              aria-current={!accountOpen && !cartOpen && mobileSection === "sets" ? "page" : undefined}
+            >
+              <Gift />
+              <span>Sets</span>
+            </button>
+            <button
+              className={accountOpen ? "is-active" : ""}
+              onClick={() => setAccountOpen(true)}
+              aria-current={accountOpen ? "page" : undefined}
+            >
+              <CircleUserRound />
+              <span>Account</span>
+            </button>
+            <button
+              className={cartOpen ? "is-active" : ""}
+              onClick={() => setCartOpen(true)}
+              aria-current={cartOpen ? "page" : undefined}
+              aria-label={`Cart with ${itemCount} items`}
+            >
+              <ShoppingBag />
+              <span>Cart</span>
+              {itemCount > 0 && <b>{itemCount > 99 ? "99+" : itemCount}</b>}
+            </button>
+          </nav>
         </main>
       ) : (
         <AdminDashboard

@@ -3,7 +3,7 @@ import "./globals.css";
 import "./production.css";
 
 const siteUrl = "https://3rnco.com.my";
-const socialImage = `${siteUrl}/og-3rnco-moringa-v2.png`;
+const socialImage = `${siteUrl}/og-3rnco-moringa-1200x630.jpg`;
 
 const structuredData = {
   "@context": "https://schema.org",
@@ -51,8 +51,8 @@ const structuredData = {
       primaryImageOfPage: {
         "@type": "ImageObject",
         url: socialImage,
-        width: 1732,
-        height: 908,
+        width: 1200,
+        height: 630,
       },
       inLanguage: "en-MY",
     },
@@ -103,6 +103,11 @@ export const metadata: Metadata = {
     telephone: false,
   },
   manifest: "/site.webmanifest",
+  appleWebApp: {
+    capable: true,
+    title: "3R&Co",
+    statusBarStyle: "black-translucent",
+  },
   icons: {
     icon: [{ url: "/images/brand/3rnco-logo.png", type: "image/png" }],
     shortcut: "/images/brand/3rnco-logo.png",
@@ -120,9 +125,9 @@ export const metadata: Metadata = {
       {
         url: socialImage,
         secureUrl: socialImage,
-        width: 1732,
-        height: 908,
-        type: "image/png",
+        width: 1200,
+        height: 630,
+        type: "image/jpeg",
         alt: "3R&Co Tree Body Oil and Body Cream surrounded by fresh moringa leaves",
       },
     ],
