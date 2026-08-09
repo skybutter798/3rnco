@@ -10,11 +10,12 @@ import {
   ChevronDown,
   ChevronRight,
   CircleUserRound,
+  Copy,
+  CreditCard,
   Gift,
   House,
   Leaf,
   Menu,
-  MessageCircle,
   Minus,
   Pause,
   Play,
@@ -24,6 +25,7 @@ import {
   ShieldCheck,
   ShoppingBag,
   Truck,
+  Upload,
   X,
 } from "lucide-react";
 import {
@@ -37,13 +39,14 @@ import {
 import AccountDialog from "./components/AccountDialog";
 import AdminDashboard from "./components/AdminDashboard";
 import BundleBuilder from "./components/BundleBuilder";
-import { apiRequest, errorMessage } from "./lib/api";
+import { ApiError, apiRequest, errorMessage } from "./lib/api";
 import type {
   AuthSession,
   AuthUser,
   Bundle,
   BundleStep,
   GalleryItem,
+  PaymentMethod,
   Product,
   Slide,
   StorefrontPayload,
@@ -493,6 +496,10 @@ export default function Home() {
   const [checkoutStep, setCheckoutStep] = useState(0);
   const [checkoutError, setCheckoutError] = useState("");
   const [checkoutBusy, setCheckoutBusy] = useState(false);
+  const [checkoutPaymentMethodId, setCheckoutPaymentMethodId] = useState("");
+  const [checkoutReceipt, setCheckoutReceipt] = useState<File | null>(null);
+  const [checkoutPaymentReference, setCheckoutPaymentReference] = useState("");
+  const [checkoutPaymentNote, setCheckoutPaymentNote] = useState("");
   const [checkoutData, setCheckoutData] = useState<CheckoutData>({
     name: "",
     email: "",
@@ -572,6 +579,18 @@ export default function Home() {
       ? settings.shippingFee
       : 0);
   const total = Math.max(0, subtotal - discount - bundleDiscount + shipping);
+  const activePaymentMethods = useMemo(
+    () =>
+      (settings.paymentMethods || [])
+        .filter((method) => method.active)
+        .sort((a, b) => Number(a.sortOrder || 0) - Number(b.sortOrder || 0)),
+    [settings.paymentMethods],
+  );
+  const effectiveCheckoutPaymentMethodId = activePaymentMethods.some(
+    (method) => method.id === checkoutPaymentMethodId,
+  )
+    ? checkoutPaymentMethodId
+    : activePaymentMethods[0]?.id || "";
 
   const handleSession = (user: AuthUser | null) => {
     setSessionUser(user);
@@ -944,10 +963,54 @@ export default function Home() {
         return;
       }
     }
+    if (checkoutStep === 2) {
+      if (!activePaymentMethods.length) {
+        setCheckoutError(
+          "Payment is temporarily unavailable. Please contact our care team for assistance.",
+        );
+        return;
+      }
+      if (
+        !activePaymentMethods.some(
+          (method) => method.id === effectiveCheckoutPaymentMethodId,
+        )
+      ) {
+        setCheckoutError("Please choose an available payment method.");
+        return;
+      }
+      if (!checkoutReceipt) {
+        setCheckoutError("Please upload your payment receipt before continuing.");
+        focusField("checkout-receipt");
+        return;
+      }
+      if (checkoutReceipt.size < 1 || checkoutReceipt.size > 8_000_000) {
+        setCheckoutError("Upload a receipt up to 8 MB.");
+        focusField("checkout-receipt");
+        return;
+      }
+      if (
+        !["image/jpeg", "image/png", "image/webp", "application/pdf"].includes(
+          checkoutReceipt.type,
+        )
+      ) {
+        setCheckoutError("Upload a JPEG, PNG, WebP or PDF receipt.");
+        focusField("checkout-receipt");
+        return;
+      }
+    }
     setCheckoutStep((step) => Math.min(3, step + 1));
   };
 
   const placeOrder = async () => {
+    const selectedPaymentMethod = activePaymentMethods.find(
+      (method) => method.id === effectiveCheckoutPaymentMethodId,
+    );
+    if (!selectedPaymentMethod || !checkoutReceipt) {
+      setCheckoutError(
+        "Please return to Payment, choose a method and upload your receipt.",
+      );
+      return;
+    }
     const unavailable = cartItems.find(
       (line) => line.quantity > (inventory[line.product.id] || 0),
     );
@@ -1010,6 +1073,34 @@ export default function Home() {
         },
       );
       const order = "order" in result ? result.order : result;
+      const receiptForm = new FormData();
+      receiptForm.append("file", checkoutReceipt);
+      receiptForm.append("paymentMethodId", selectedPaymentMethod.id);
+      if (checkoutPaymentReference.trim())
+        receiptForm.append(
+          "customerReference",
+          checkoutPaymentReference.trim(),
+        );
+      if (checkoutPaymentNote.trim())
+        receiptForm.append("customerNote", checkoutPaymentNote.trim());
+      try {
+        await apiRequest(`/orders/${order.id}/receipt`, {
+          method: "POST",
+          body: receiptForm,
+        });
+      } catch (error) {
+        if (
+          !(
+            error instanceof ApiError &&
+            error.code === "RECEIPT_ALREADY_SUBMITTED"
+          )
+        ) {
+          setCheckoutError(
+            `Order ${order.orderNumber || order.id} is saved, but the receipt upload did not finish. Try Submit again, or upload it from Profile > Orders. ${errorMessage(error)}`,
+          );
+          return;
+        }
+      }
       setInventory((current) => {
         const next = { ...current };
         cartItems.forEach((line) => {
@@ -1029,6 +1120,9 @@ export default function Home() {
       setDiscount(0);
       setPromoShipping(null);
       setBundleSelection(null);
+      setCheckoutReceipt(null);
+      setCheckoutPaymentReference("");
+      setCheckoutPaymentNote("");
       orderAttemptRef.current = null;
     } catch (error) {
       setCheckoutError(errorMessage(error));
@@ -2268,6 +2362,15 @@ export default function Home() {
           bundleDiscount={bundleDiscount}
           promoCode={promoCode}
           total={total}
+          paymentMethods={activePaymentMethods}
+          paymentMethodId={effectiveCheckoutPaymentMethodId}
+          setPaymentMethodId={setCheckoutPaymentMethodId}
+          receipt={checkoutReceipt}
+          setReceipt={setCheckoutReceipt}
+          paymentReference={checkoutPaymentReference}
+          setPaymentReference={setCheckoutPaymentReference}
+          paymentNote={checkoutPaymentNote}
+          setPaymentNote={setCheckoutPaymentNote}
           viewOrder={() => {
             setCheckoutOpen(false);
             setAccountOpen(true);
@@ -2502,6 +2605,15 @@ type CheckoutProps = {
   bundleDiscount: number;
   promoCode: string;
   total: number;
+  paymentMethods: PaymentMethod[];
+  paymentMethodId: string;
+  setPaymentMethodId: (id: string) => void;
+  receipt: File | null;
+  setReceipt: (file: File | null) => void;
+  paymentReference: string;
+  setPaymentReference: (value: string) => void;
+  paymentNote: string;
+  setPaymentNote: (value: string) => void;
   viewOrder: () => void;
 };
 
@@ -2523,12 +2635,35 @@ function Checkout({
   bundleDiscount,
   promoCode,
   total,
+  paymentMethods,
+  paymentMethodId,
+  setPaymentMethodId,
+  receipt,
+  setReceipt,
+  paymentReference,
+  setPaymentReference,
+  paymentNote,
+  setPaymentNote,
   viewOrder,
 }: CheckoutProps) {
   const update = (key: keyof CheckoutData, value: string) =>
     setData((current) => ({ ...current, [key]: value }));
   const labels = ["Contact", "Delivery", "Payment", "Review"];
   const headingRef = useRef<HTMLHeadingElement>(null);
+  const [copiedPayment, setCopiedPayment] = useState(false);
+  const selectedPaymentMethod = paymentMethods.find(
+    (method) => method.id === paymentMethodId,
+  );
+
+  const copyAccountNumber = async (accountNumber: string) => {
+    try {
+      await navigator.clipboard.writeText(accountNumber);
+      setCopiedPayment(true);
+      window.setTimeout(() => setCopiedPayment(false), 1800);
+    } catch {
+      setCopiedPayment(false);
+    }
+  };
 
   useEffect(() => {
     const timer = window.setTimeout(() => headingRef.current?.focus(), 0);
@@ -2735,22 +2870,137 @@ function Checkout({
                     Payment confirmation.
                   </h2>
                   <p className="checkout-intro">
-                    Your order will be reserved while our care team confirms
-                    payment with you.
+                    Choose an available method, complete the transfer and attach
+                    your receipt. We will verify it before preparing your order.
                   </p>
-                  <div className="payment-options">
-                    <button className="is-selected" aria-pressed="true">
-                      <MessageCircle size={21} />
-                      <span>
-                        <b>Manual confirmation</b>
-                        <small>
-                          We will share the next step using your registered
-                          contact details
-                        </small>
-                      </span>
-                      <CheckCircle2 size={18} />
-                    </button>
-                  </div>
+                  {paymentMethods.length ? (
+                    <>
+                      <div className="payment-options checkout-payment-options">
+                        {paymentMethods.map((method) => (
+                          <button
+                            type="button"
+                            key={method.id}
+                            className={
+                              paymentMethodId === method.id ? "is-selected" : ""
+                            }
+                            aria-pressed={paymentMethodId === method.id}
+                            onClick={() => setPaymentMethodId(method.id)}
+                          >
+                            <CreditCard size={21} />
+                            <span>
+                              <b>{method.name}</b>
+                              <small>
+                                {method.type === "bank_transfer"
+                                  ? "Transfer using the bank details below"
+                                  : "Scan the QR code and complete your payment"}
+                              </small>
+                            </span>
+                            {paymentMethodId === method.id && (
+                              <CheckCircle2 size={18} />
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                      {selectedPaymentMethod && (
+                        <div className="payment-destination checkout-payment-destination">
+                          {selectedPaymentMethod.qrImage && (
+                            <img
+                              src={selectedPaymentMethod.qrImage}
+                              alt={`${selectedPaymentMethod.name} payment QR code`}
+                            />
+                          )}
+                          <div>
+                            <h4>{selectedPaymentMethod.name}</h4>
+                            {selectedPaymentMethod.bankName && (
+                              <p>
+                                <b>Bank:</b> {selectedPaymentMethod.bankName}
+                              </p>
+                            )}
+                            {selectedPaymentMethod.accountName && (
+                              <p>
+                                <b>Account name:</b>{" "}
+                                {selectedPaymentMethod.accountName}
+                              </p>
+                            )}
+                            {selectedPaymentMethod.accountNumber && (
+                              <p>
+                                <b>Account number:</b>{" "}
+                                {selectedPaymentMethod.accountNumber}
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    copyAccountNumber(
+                                      selectedPaymentMethod.accountNumber || "",
+                                    )
+                                  }
+                                >
+                                  <Copy size={12} />
+                                  {copiedPayment ? "Copied" : "Copy"}
+                                </button>
+                              </p>
+                            )}
+                            {selectedPaymentMethod.instructions && (
+                              <p className="checkout-payment-instructions">
+                                {selectedPaymentMethod.instructions}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                      <div className="checkout-payment-fields">
+                        <label className="receipt-upload checkout-receipt-upload">
+                          <Upload size={21} />
+                          <span>
+                            <b>
+                              {receipt
+                                ? receipt.name
+                                : "Upload payment receipt"}
+                            </b>
+                            <small>JPEG, PNG, WebP or PDF · maximum 8 MB</small>
+                          </span>
+                          <input
+                            id="checkout-receipt"
+                            type="file"
+                            accept="image/jpeg,image/png,image/webp,application/pdf"
+                            onChange={(event) =>
+                              setReceipt(event.target.files?.[0] || null)
+                            }
+                          />
+                        </label>
+                        <label>
+                          Payment reference <span>Optional</span>
+                          <input
+                            value={paymentReference}
+                            maxLength={160}
+                            onChange={(event) =>
+                              setPaymentReference(event.target.value)
+                            }
+                            placeholder="Transaction or reference number"
+                          />
+                        </label>
+                        <label>
+                          Note <span>Optional</span>
+                          <textarea
+                            value={paymentNote}
+                            maxLength={1000}
+                            onChange={(event) =>
+                              setPaymentNote(event.target.value)
+                            }
+                            placeholder="Anything our care team should know"
+                          />
+                        </label>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="checkout-payment-unavailable" role="status">
+                      <CreditCard size={22} />
+                      <p>
+                        <b>Payment is temporarily unavailable.</b>
+                        No payment method is active right now. Please contact our
+                        care team for assistance.
+                      </p>
+                    </div>
+                  )}
                   <div className="payment-sandbox">
                     <ShieldCheck size={19} />
                     <p>
@@ -2796,9 +3046,9 @@ function Checkout({
                     <div>
                       <span>Payment</span>
                       <p>
-                        <b>Manual confirmation</b>
+                        <b>{selectedPaymentMethod?.name || "Manual payment"}</b>
                         <br />
-                        No payment credentials collected here
+                        {receipt?.name || "Receipt not attached"}
                       </p>
                       <button onClick={() => setStep(2)}>Review</button>
                     </div>
@@ -2832,7 +3082,7 @@ function Checkout({
                     onClick={placeOrder}
                     disabled={busy}
                   >
-                    {busy ? "Placing order…" : "Place order"}{" "}
+                    {busy ? "Submitting order…" : "Submit order & receipt"}{" "}
                     <Check size={16} />
                   </button>
                 )}
@@ -2907,8 +3157,8 @@ function Checkout({
             <em>being prepared.</em>
           </h1>
           <p>
-            Your order <b>{confirmationId}</b> is safely recorded. Our care team
-            will follow up with payment confirmation details.
+            Your order <b>{confirmationId}</b> and payment receipt are safely
+            recorded. Our care team will verify the payment and update its status.
           </p>
           <div>
             <button className="button button--dark" onClick={viewOrder}>

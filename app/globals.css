@@ -2368,6 +2368,107 @@ button:disabled {
   color: var(--olive);
 }
 
+.checkout-payment-options {
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+}
+
+.checkout-payment-destination {
+  margin-top: 14px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.checkout-payment-destination > div {
+  min-width: 0;
+}
+
+.checkout-payment-destination p {
+  overflow-wrap: anywhere;
+}
+
+.checkout-payment-destination button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.checkout-payment-instructions {
+  margin-top: 10px !important;
+  color: rgba(45, 40, 36, 0.62);
+  line-height: 1.55;
+}
+
+.checkout-payment-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.checkout-payment-fields > label:not(.receipt-upload) {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  color: rgba(45, 40, 36, 0.72);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.checkout-payment-fields > label:not(.receipt-upload) > span {
+  color: rgba(45, 40, 36, 0.42);
+  font-size: 7px;
+}
+
+.checkout-payment-fields input:not([type="file"]),
+.checkout-payment-fields textarea {
+  width: 100%;
+  padding: 12px 13px;
+  border: 1px solid var(--line);
+  border-radius: 0;
+  outline: none;
+  background: white;
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.checkout-payment-fields textarea {
+  min-height: 76px;
+  resize: vertical;
+}
+
+.checkout-payment-fields input:focus,
+.checkout-payment-fields textarea:focus {
+  border-color: var(--clay);
+  box-shadow: 0 0 0 3px rgba(140, 108, 82, 0.08);
+}
+
+.checkout-receipt-upload {
+  grid-column: 1 / -1;
+  min-height: 72px;
+}
+
+.checkout-payment-unavailable {
+  display: flex;
+  gap: 13px;
+  padding: 18px;
+  border: 1px solid rgba(138, 63, 46, 0.24);
+  background: rgba(138, 63, 46, 0.06);
+  color: var(--clay);
+}
+
+.checkout-payment-unavailable p {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  color: rgba(45, 40, 36, 0.72);
+  font-size: 10px;
+  line-height: 1.55;
+}
+
 .payment-sandbox,
 .settings-note {
   display: flex;
@@ -4601,6 +4702,15 @@ button:disabled {
 
   .form-grid {
     grid-template-columns: 1fr;
+  }
+
+  .checkout-payment-options,
+  .checkout-payment-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .checkout-receipt-upload {
+    grid-column: auto;
   }
 
   .form-grid label.full {

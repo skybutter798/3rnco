@@ -106,6 +106,11 @@ test("includes persistent production commerce and clean seed contracts", async (
   assert.match(page, /orderAttemptRef/);
   assert.match(page, /fingerprint\s*=\s*JSON\.stringify\(orderBody\)/);
   assert.match(page, /paymentMethod:\s*"manual_confirmation"/);
+  assert.match(page, /paymentMethods=\{activePaymentMethods\}/);
+  assert.match(page, /\/orders\/\$\{order\.id\}\/receipt/);
+  assert.match(page, /receiptForm\.append\("paymentMethodId"/);
+  assert.match(page, /Submit order & receipt/);
+  assert.match(page, /RECEIPT_ALREADY_SUBMITTED/);
   assert.match(page, /AdminDashboard/);
   assert.match(page, /AccountDialog/);
   assert.match(page, /BundleBuilder/);
