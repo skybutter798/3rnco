@@ -307,22 +307,22 @@ const fallbackGallery: GalleryItem[] = [
 
 const fallbackSlides: Slide[] = [
   {
-    image: "/images/moringa-slider/moringa-product-ritual.webp",
+    image: "/images/campaign/story-care.webp",
+    eyebrow: "Our beginning · Since 2019",
+    title: "Care began",
+    emphasis: "at home.",
+    copy: "First made to care for family, our body ritual has grown through research, making and patient refinement.",
+    caption: "Family care · Made in Malaysia · Since 2019",
+    tone: "light",
+    position: "center 42%",
+  },
+  {
+    image: "/images/generated-v3/slider-botanical-leaf-v3.webp",
     eyebrow: "Main ingredient · Moringa leaves",
     title: "From moringa,",
     emphasis: "care takes root.",
     copy: "Fresh moringa leaves are the botanical centre of our Body Oil and Body Cream ritual.",
-    caption: "Body Oil · Body Cream · Since 2019",
-    tone: "dark",
-    position: "center",
-  },
-  {
-    image: "/images/generated-v3/slider-botanical-leaf-v3.webp",
-    eyebrow: "Our beginning · Since 2019",
-    title: "Care began",
-    emphasis: "at home.",
-    copy: "Since 2019, 3R&Co has grown from family care into an everyday body ritual rooted in moringa.",
-    caption: "Family care · Since 2019",
+    caption: "Moringa oleifera · Body Oil · Body Cream",
     tone: "light",
     position: "center",
   },
@@ -1390,15 +1390,15 @@ export default function Home() {
               <div className="hero__actions">
                 <button
                   className="button button--dark"
-                  onClick={() => scrollTo("collection")}
+                  onClick={() => scrollTo("story")}
                 >
-                  Meet the ritual <ArrowDownRight size={17} />
+                  Our story <ArrowDownRight size={17} />
                 </button>
                 <button
                   className="text-link"
-                  onClick={() => scrollTo("introduction")}
+                  onClick={() => scrollTo("collection")}
                 >
-                  Why moringa <span>↗</span>
+                  Meet the ritual <span>↗</span>
                 </button>
               </div>
             </div>
@@ -1415,7 +1415,7 @@ export default function Home() {
                 <div
                   className="hero__controls"
                   role="group"
-                  aria-label="Moringa story slides"
+                  aria-label="Care and moringa story slides"
                 >
                   <button
                     onClick={() => setHeroPaused((current) => !current)}

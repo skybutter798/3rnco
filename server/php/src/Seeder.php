@@ -292,8 +292,8 @@ final class Seeder
     private function slides(): array
     {
         return [
-            ['id' => 'from-moringa', 'image' => '/images/moringa-slider/moringa-product-ritual.webp', 'eyebrow' => 'Main ingredient · Moringa leaves', 'title' => 'From moringa,', 'emphasis' => 'care takes root.', 'copy' => 'Fresh moringa leaves are the botanical centre of our Body Oil and Body Cream ritual.', 'caption' => 'Body Oil · Body Cream · Since 2019', 'tone' => 'dark', 'position' => 'center'],
-            ['id' => 'care-began-at-home', 'image' => '/images/generated-v3/slider-botanical-leaf-v3.webp', 'eyebrow' => 'Our beginning · Since 2019', 'title' => 'Care began', 'emphasis' => 'at home.', 'copy' => 'Since 2019, 3R&Co has grown from family care into an everyday body ritual rooted in moringa.', 'caption' => 'Family care · Since 2019', 'tone' => 'light', 'position' => 'center'],
+            ['id' => 'from-moringa', 'image' => '/images/campaign/story-care.webp', 'eyebrow' => 'Our beginning · Since 2019', 'title' => 'Care began', 'emphasis' => 'at home.', 'copy' => 'First made to care for family, our body ritual has grown through research, making and patient refinement.', 'caption' => 'Family care · Made in Malaysia · Since 2019', 'tone' => 'light', 'position' => 'center 42%'],
+            ['id' => 'care-began-at-home', 'image' => '/images/generated-v3/slider-botanical-leaf-v3.webp', 'eyebrow' => 'Main ingredient · Moringa leaves', 'title' => 'From moringa,', 'emphasis' => 'care takes root.', 'copy' => 'Fresh moringa leaves are the botanical centre of our Body Oil and Body Cream ritual.', 'caption' => 'Moringa oleifera · Body Oil · Body Cream', 'tone' => 'light', 'position' => 'center'],
             ['id' => 'rooted-in-moringa', 'image' => '/images/moringa-slider/moringa-ingredient-table.webp', 'eyebrow' => 'The complete ritual', 'title' => 'Rooted in', 'emphasis' => 'moringa.', 'copy' => 'One botanical story, expressed through a fluid Body Oil and a rich Body Cream texture.', 'caption' => 'Two textures · One botanical heart', 'tone' => 'light', 'position' => 'center'],
         ];
     }

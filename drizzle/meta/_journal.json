@@ -29,6 +29,13 @@
       "when": 1786286400000,
       "tag": "0003_staff_manual_payments",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1786464000000,
+      "tag": "0004_care_led_hero",
+      "breakpoints": true
     }
   ]
 }

@@ -34,9 +34,12 @@ test("production seed preserves the approved current storefront content", () => 
   assert.match(seedSource, /body-cream-texture-v4\.webp/u);
   assert.match(
     seedSource,
-    /title: "From moringa,"[\s\S]*?emphasis: "care takes root\."/u,
+    /image: "\/images\/campaign\/story-care\.webp"[\s\S]*?title: "Care began"[\s\S]*?emphasis: "at home\."/u,
   );
-  assert.match(seedSource, /title: "Care began"[\s\S]*?emphasis: "at home\."/u);
+  assert.match(
+    seedSource,
+    /image: "\/images\/generated-v3\/slider-botanical-leaf-v3\.webp"[\s\S]*?title: "From moringa,"[\s\S]*?emphasis: "care takes root\."/u,
+  );
   assert.match(seedSource, /title: "Rooted in"[\s\S]*?emphasis: "moringa\."/u);
   assert.match(seedSource, /'support@3rnco\.com\.my'/u);
   assert.match(seedSource, /'\+60177816398'/u);

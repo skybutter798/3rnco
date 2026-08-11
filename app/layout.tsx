@@ -118,9 +118,9 @@ export const metadata: Metadata = {
     locale: "en_MY",
     url: `${siteUrl}/`,
     siteName: "3R&Co Malaysia",
-    title: "Moringa at the heart | 3R&Co Malaysia",
+    title: "Care began at home | 3R&Co Malaysia",
     description:
-      "Body oil, body cream and cleansing care rooted in moringa leaves and made for the everyday ritual.",
+      "Care began at home. Discover moringa-led body oil, body cream and cleansing care, made in Malaysia since 2019.",
     images: [
       {
         url: socialImage,
@@ -134,9 +134,9 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: "Moringa at the heart | 3R&Co Malaysia",
+    title: "Care began at home | 3R&Co Malaysia",
     description:
-      "Body oil, body cream and cleansing care rooted in moringa leaves.",
+      "Care that began at home, expressed through moringa-led body oil, body cream and cleansing care.",
     images: [socialImage],
   },
 };

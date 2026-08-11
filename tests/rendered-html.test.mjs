@@ -43,11 +43,12 @@ test("server-renders the current 3R&Co storefront", async () => {
   assert.match(html, /aria-label="Mobile app navigation"/i);
   assert.match(html, /name="twitter:card" content="summary_large_image"/i);
   assert.match(html, /application\/ld\+json/i);
-  assert.match(html, /From moringa,/);
-  assert.match(html, /care takes root\./);
   assert.match(html, /Care began/);
   assert.match(html, /at home\./);
-  assert.match(html, /\/images\/moringa-slider\/moringa-product-ritual\.webp/);
+  assert.match(html, /From moringa,/);
+  assert.match(html, /care takes root\./);
+  assert.match(html, /\/images\/campaign\/story-care\.webp/);
+  assert.match(html, /\/images\/generated-v3\/slider-botanical-leaf-v3\.webp/);
   assert.match(html, /Body Cream/);
   assert.match(html, /Champion Soap Bar/);
   assert.match(html, /Tree Body Oil/);
