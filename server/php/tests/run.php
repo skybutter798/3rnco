@@ -105,7 +105,7 @@ $app = new App($config, $database);
 $cookieName = $config->string('session.cookie');
 
 test('SQLite migration applies once and is idempotent', function () use ($applied, $migrator): void {
-    assertSameValue(['001_schema', '002_staff_payments'], $applied);
+    assertSameValue(['001_schema', '002_staff_payments', '003_care_led_hero'], $applied);
     assertSameValue([], $migrator->migrate());
 });
 
@@ -140,8 +140,10 @@ test('storefront contract contains current content and exact bundle shape', func
     $data = $response->body['data'];
     assertSameValue('3R&Co Malaysia', $data['settings']['storeName']);
     assertSameValue('60177816398', $data['settings']['whatsappNumber']);
-    assertSameValue('From moringa,', $data['slides'][0]['title']);
-    assertSameValue('Care began', $data['slides'][1]['title']);
+    assertSameValue('Care began', $data['slides'][0]['title']);
+    assertSameValue('/images/campaign/story-care.webp', $data['slides'][0]['image']);
+    assertSameValue('From moringa,', $data['slides'][1]['title']);
+    assertSameValue('/images/generated-v3/slider-botanical-leaf-v3.webp', $data['slides'][1]['image']);
     assertSameValue('/images/generated-v3/body-cream-texture-v4.webp', $data['products'][0]['storyImages'][0]['image']);
     assertTrue(is_int($data['products'][0]['price']) || is_float($data['products'][0]['price']), 'MYR price must be numeric');
     assertSameValue(0, $data['products'][0]['stock']);
