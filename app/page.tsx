@@ -307,14 +307,14 @@ const fallbackGallery: GalleryItem[] = [
 
 const fallbackSlides: Slide[] = [
   {
-    image: "/images/campaign/story-care.webp",
-    eyebrow: "Our beginning · Since 2019",
-    title: "Care began",
-    emphasis: "at home.",
-    copy: "First made to care for family, our body ritual has grown through research, making and patient refinement.",
-    caption: "Family care · Made in Malaysia · Since 2019",
+    image: "/images/campaign/story-care-warm-v2.webp",
+    eyebrow: "From our home · Since 2019",
+    title: "Care lives",
+    emphasis: "in the little things.",
+    copy: "Born from caring for family, our everyday ritual is made with patience, warmth and attention to every detail.",
+    caption: "Made slowly · Shared with care · Since 2019",
     tone: "light",
-    position: "center 42%",
+    position: "center",
   },
   {
     image: "/images/generated-v3/slider-botanical-leaf-v3.webp",

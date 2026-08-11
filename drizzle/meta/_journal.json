@@ -36,6 +36,13 @@
       "when": 1786464000000,
       "tag": "0004_care_led_hero",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1786467600000,
+      "tag": "0005_warm_gentle_hero",
+      "breakpoints": true
     }
   ]
 }

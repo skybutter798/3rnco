@@ -118,9 +118,9 @@ export const metadata: Metadata = {
     locale: "en_MY",
     url: `${siteUrl}/`,
     siteName: "3R&Co Malaysia",
-    title: "Care began at home | 3R&Co Malaysia",
+    title: "Care lives in the little things | 3R&Co Malaysia",
     description:
-      "Care began at home. Discover moringa-led body oil, body cream and cleansing care, made in Malaysia since 2019.",
+      "Born from caring for family, 3R&Co makes gentle moringa-led body rituals with patience, warmth and attention to every detail.",
     images: [
       {
         url: socialImage,
@@ -134,9 +134,9 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: "Care began at home | 3R&Co Malaysia",
+    title: "Care lives in the little things | 3R&Co Malaysia",
     description:
-      "Care that began at home, expressed through moringa-led body oil, body cream and cleansing care.",
+      "Gentle moringa-led body care, made with patience, warmth and attention to every detail.",
     images: [socialImage],
   },
 };

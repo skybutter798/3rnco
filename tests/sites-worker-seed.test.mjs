@@ -34,7 +34,7 @@ test("production seed preserves the approved current storefront content", () => 
   assert.match(seedSource, /body-cream-texture-v4\.webp/u);
   assert.match(
     seedSource,
-    /image: "\/images\/campaign\/story-care\.webp"[\s\S]*?title: "Care began"[\s\S]*?emphasis: "at home\."/u,
+    /image: "\/images\/campaign\/story-care-warm-v2\.webp"[\s\S]*?title: "Care lives"[\s\S]*?emphasis: "in the little things\."/u,
   );
   assert.match(
     seedSource,
