@@ -1566,17 +1566,17 @@ export default function Home() {
 
           <section className="editorial-break reveal">
             <img
-              src="/images/generated-v3/moringa-study-v3.webp"
-              alt="Moringa, kaffir lime, black seed, almond and olives arranged directly on linen and stone"
+              src="/images/campaign/quiet-return-v5.webp"
+              alt="A handmade ceramic basin of water beside soft linen and amber glass in warm afternoon light"
             />
             <div className="editorial-break__overlay">
-              <p className="eyebrow">A moringa study</p>
+              <p className="eyebrow">A quiet return</p>
               <h2>
-                Fresh leaf.
+                Let the day
                 <br />
-                Amber light.
+                soften.{" "}<em>Return</em>
                 <br />
-                <em>At the heart.</em>
+                <em>to yourself.</em>
               </h2>
             </div>
           </section>
