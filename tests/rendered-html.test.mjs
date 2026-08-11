@@ -49,9 +49,9 @@ test("server-renders the current 3R&Co storefront", async () => {
   assert.match(html, /care takes root\./);
   assert.match(html, /\/images\/campaign\/story-care-essence-v3\.webp/);
   assert.match(html, /\/images\/generated-v3\/slider-botanical-leaf-v3\.webp/);
-  assert.match(html, /From our hands to yours/);
-  assert.match(html, /Made slowly\./);
-  assert.match(html, /\/images\/campaign\/patient-making-v6\.webp/);
+  assert.match(html, /Where textures meet/);
+  assert.match(html, /Golden light\./);
+  assert.match(html, /\/images\/campaign\/textures-meet-v7\.webp/);
   assert.match(html, /Body Cream/);
   assert.match(html, /Champion Soap Bar/);
   assert.match(html, /Tree Body Oil/);

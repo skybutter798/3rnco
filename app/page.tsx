@@ -1566,17 +1566,17 @@ export default function Home() {
 
           <section className="editorial-break reveal">
             <img
-              src="/images/campaign/patient-making-v6.webp"
-              alt="Hands carefully measuring 3R&Co body oil beside body cream and a well-used formulation notebook"
+              src="/images/campaign/textures-meet-v7.webp"
+              alt="Velvety cream and luminous botanical oil shaped into three tactile arcs on handmade green ceramic"
             />
             <div className="editorial-break__overlay">
-              <p className="eyebrow">From our hands to yours</p>
+              <p className="eyebrow">Where textures meet</p>
               <h2>
-                Made slowly.
+                Golden light.
                 <br />
-                <em>With you</em>
+                Velvet touch.
                 <br />
-                <em>in mind.</em>
+                <em>A softer moment.</em>
               </h2>
             </div>
           </section>
