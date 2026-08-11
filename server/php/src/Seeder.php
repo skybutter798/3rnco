@@ -292,7 +292,7 @@ final class Seeder
     private function slides(): array
     {
         return [
-            ['id' => 'from-moringa', 'image' => '/images/campaign/story-care-warm-v2.webp', 'eyebrow' => 'From our home · Since 2019', 'title' => 'Care lives', 'emphasis' => 'in the little things.', 'copy' => 'Born from caring for family, our everyday ritual is made with patience, warmth and attention to every detail.', 'caption' => 'Made slowly · Shared with care · Since 2019', 'tone' => 'light', 'position' => 'center'],
+            ['id' => 'from-moringa', 'image' => '/images/campaign/story-care-essence-v3.webp', 'eyebrow' => 'Relieve · Restore · Rejuvenate', 'title' => 'Come home', 'emphasis' => 'to care.', 'copy' => 'Born from family care in 2019, our moringa-led body ritual is made to relieve, restore and bring you gently back to yourself.', 'caption' => 'Family care · Made in Malaysia · Since 2019', 'tone' => 'light', 'position' => 'center'],
             ['id' => 'care-began-at-home', 'image' => '/images/generated-v3/slider-botanical-leaf-v3.webp', 'eyebrow' => 'Main ingredient · Moringa leaves', 'title' => 'From moringa,', 'emphasis' => 'care takes root.', 'copy' => 'Fresh moringa leaves are the botanical centre of our Body Oil and Body Cream ritual.', 'caption' => 'Moringa oleifera · Body Oil · Body Cream', 'tone' => 'light', 'position' => 'center'],
             ['id' => 'rooted-in-moringa', 'image' => '/images/moringa-slider/moringa-ingredient-table.webp', 'eyebrow' => 'The complete ritual', 'title' => 'Rooted in', 'emphasis' => 'moringa.', 'copy' => 'One botanical story, expressed through a fluid Body Oil and a rich Body Cream texture.', 'caption' => 'Two textures · One botanical heart', 'tone' => 'light', 'position' => 'center'],
         ];

@@ -118,9 +118,9 @@ export const metadata: Metadata = {
     locale: "en_MY",
     url: `${siteUrl}/`,
     siteName: "3R&Co Malaysia",
-    title: "Care lives in the little things | 3R&Co Malaysia",
+    title: "Come home to care | 3R&Co Malaysia",
     description:
-      "Born from caring for family, 3R&Co makes gentle moringa-led body rituals with patience, warmth and attention to every detail.",
+      "Born from family care in 2019, 3R&Co creates moringa-led body rituals to relieve, restore and bring you gently back to yourself.",
     images: [
       {
         url: socialImage,
@@ -134,9 +134,9 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: "Care lives in the little things | 3R&Co Malaysia",
+    title: "Come home to care | 3R&Co Malaysia",
     description:
-      "Gentle moringa-led body care, made with patience, warmth and attention to every detail.",
+      "Moringa-led body care, born from family care and made to relieve, restore and rejuvenate.",
     images: [socialImage],
   },
 };

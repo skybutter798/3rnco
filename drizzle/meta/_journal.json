@@ -43,6 +43,13 @@
       "when": 1786467600000,
       "tag": "0005_warm_gentle_hero",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1786471200000,
+      "tag": "0006_core_essence_hero",
+      "breakpoints": true
     }
   ]
 }
