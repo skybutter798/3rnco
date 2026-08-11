@@ -1566,17 +1566,17 @@ export default function Home() {
 
           <section className="editorial-break reveal">
             <img
-              src="/images/campaign/quiet-return-v5.webp"
-              alt="A handmade ceramic basin of water beside soft linen and amber glass in warm afternoon light"
+              src="/images/campaign/patient-making-v6.webp"
+              alt="Hands carefully measuring 3R&Co body oil beside body cream and a well-used formulation notebook"
             />
             <div className="editorial-break__overlay">
-              <p className="eyebrow">A quiet return</p>
+              <p className="eyebrow">From our hands to yours</p>
               <h2>
-                Let the day
+                Made slowly.
                 <br />
-                soften.{" "}<em>Return</em>
+                <em>With you</em>
                 <br />
-                <em>to yourself.</em>
+                <em>in mind.</em>
               </h2>
             </div>
           </section>
