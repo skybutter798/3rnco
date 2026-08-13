@@ -181,3 +181,19 @@ test("includes persistent production commerce and clean seed contracts", async (
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
   assert.match(packageJson, /cross-env WRANGLER_LOG_PATH/);
 });
+
+test("cPanel redirects the www alias to the API's canonical origin", async () => {
+  const [rootHtaccess, packagedHtaccess] = await Promise.all([
+    readFile(new URL("../.htaccess", import.meta.url), "utf8"),
+    readFile(new URL("../deploy/cpanel/.htaccess", import.meta.url), "utf8"),
+  ]);
+
+  for (const source of [rootHtaccess, packagedHtaccess]) {
+    assert.match(source, /\^www\\\.3rnco\\\.com\\\.my\$/);
+    assert.match(
+      source,
+      /RewriteRule \^ https:\/\/3rnco\.com\.my%\{REQUEST_URI\} \[R=301,L,NE\]/,
+    );
+    assert.doesNotMatch(source, /https:\/\/%\{HTTP_HOST\}/);
+  }
+});
