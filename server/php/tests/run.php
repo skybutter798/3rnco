@@ -105,7 +105,7 @@ $app = new App($config, $database);
 $cookieName = $config->string('session.cookie');
 
 test('SQLite migration applies once and is idempotent', function () use ($applied, $migrator): void {
-    assertSameValue(['001_schema', '002_staff_payments', '003_care_led_hero', '004_warm_gentle_hero', '005_core_essence_hero'], $applied);
+    assertSameValue(['001_schema', '002_staff_payments', '003_care_led_hero', '004_warm_gentle_hero', '005_core_essence_hero', '006_referrals'], $applied);
     assertSameValue([], $migrator->migrate());
 });
 
@@ -317,6 +317,87 @@ test('promo CRUD and validation use server-side product prices', function () use
     assertSameValue(200, $promo->status);
     assertTrue($promo->body['data']['valid'] === true);
     assertSameValue(6.9, $promo->body['data']['discount']);
+});
+
+test('referral links apply configurable discounts and pay commission on repeat downline orders', function () use ($app, $database, $cookieName, &$adminSession, &$customerSession): void {
+    $owner = callApi($app, 'POST', '/api/v1/admin/customers', [
+        'fullName' => 'Sky Butter', 'email' => 'skybutter@example.test', 'phone' => '+60113334444',
+        'password' => 'ReferralOwner123', 'status' => 'active',
+    ], ['X-CSRF-Token' => $adminSession['csrf']], [$cookieName => $adminSession['cookie']]);
+    assertSameValue(201, $owner->status);
+
+    $linkInput = [
+        'code' => 'skybutter', 'name' => 'Skybutter partner link',
+        'referrerUserId' => $owner->body['data']['customer']['id'],
+        'discountPercent' => 15, 'discountScope' => 'first_purchase',
+        'commissionPercent' => 15, 'attributionDays' => 45, 'active' => true,
+    ];
+    $createdLink = callApi($app, 'POST', '/api/v1/admin/referrals', $linkInput, ['X-CSRF-Token' => $adminSession['csrf']], [$cookieName => $adminSession['cookie']]);
+    assertSameValue(201, $createdLink->status);
+    assertSameValue(15, $createdLink->body['data']['referral']['discountPercent']);
+    assertSameValue(15, $createdLink->body['data']['referral']['commissionPercent']);
+    assertSameValue('first_purchase', $createdLink->body['data']['referral']['discountScope']);
+
+    $existingCustomerPreview = callApi($app, 'POST', '/api/v1/referrals/resolve', ['code' => 'skybutter'], ['X-CSRF-Token' => $customerSession['csrf']], [$cookieName => $customerSession['cookie']]);
+    assertSameValue(200, $existingCustomerPreview->status);
+    assertSameValue(false, $existingCustomerPreview->body['data']['eligible']);
+
+    $guest = sessionFrom(callApi($app, 'GET', '/api/v1/auth/session', null, [], [], '127.0.0.2'), $cookieName);
+    $registered = callApi($app, 'POST', '/api/v1/auth/register', [
+        'fullName' => 'Referral Buyer', 'email' => 'referral-buyer@example.test', 'phone' => '+60115556666', 'password' => 'ReferralBuyer123',
+    ], ['X-CSRF-Token' => $guest['csrf']], [$cookieName => $guest['cookie']], '127.0.0.2');
+    assertSameValue(201, $registered->status);
+    $buyer = sessionFrom($registered, $cookieName);
+
+    $preview = callApi($app, 'POST', '/api/v1/referrals/resolve', ['code' => 'skybutter'], ['X-CSRF-Token' => $buyer['csrf']], [$cookieName => $buyer['cookie']], '127.0.0.2');
+    assertSameValue(200, $preview->status);
+    assertSameValue(true, $preview->body['data']['eligible']);
+    assertSameValue(45, $preview->body['data']['attributionDays']);
+
+    $stocked = callApi($app, 'PATCH', '/api/v1/admin/products/tree-body-oil-travel', ['stock' => 2, 'expectedStock' => 0], ['X-CSRF-Token' => $adminSession['csrf']], [$cookieName => $adminSession['cookie']]);
+    assertSameValue(200, $stocked->status);
+    $orderBody = [
+        'items' => [['productId' => 'tree-body-oil-travel', 'quantity' => 1]],
+        'referralCode' => 'skybutter',
+        'shippingAddress' => ['recipientName' => 'Referral Buyer', 'phone' => '+60115556666', 'line1' => '15 Referral Lane', 'city' => 'Kuala Lumpur', 'postcode' => '50000', 'state' => 'Kuala Lumpur', 'country' => 'Malaysia'],
+        'paymentMethod' => 'manual_confirmation',
+    ];
+    $first = callApi($app, 'POST', '/api/v1/orders', $orderBody, ['X-CSRF-Token' => $buyer['csrf'], 'Idempotency-Key' => 'referral-first-order-0001'], [$cookieName => $buyer['cookie']], '127.0.0.2');
+    assertSameValue(201, $first->status);
+    assertSameValue('skybutter', $first->body['data']['order']['referralCode']);
+    assertSameValue(7.35, $first->body['data']['order']['referralDiscount']);
+    assertSameValue(1, (int) $database->fetchOne('SELECT COUNT(*) AS aggregate FROM customer_referrals')['aggregate']);
+    $firstCommission = $database->fetchOne('SELECT status, basis_cents, rate_basis_points, amount_cents FROM referral_commissions ORDER BY id DESC LIMIT 1');
+    assertSameValue('pending', $firstCommission['status']);
+    assertSameValue(4165, (int) $firstCommission['basis_cents']);
+    assertSameValue(1500, (int) $firstCommission['rate_basis_points']);
+    assertSameValue(625, (int) $firstCommission['amount_cents']);
+
+    $confirmed = callApi($app, 'PATCH', '/api/v1/admin/orders/' . $first->body['data']['order']['id'], ['status' => 'payment_confirmed', 'paymentStatus' => 'confirmed'], ['X-CSRF-Token' => $adminSession['csrf']], [$cookieName => $adminSession['cookie']]);
+    assertSameValue(200, $confirmed->status);
+    assertSameValue('approved', $database->fetchOne('SELECT status FROM referral_commissions ORDER BY id DESC LIMIT 1')['status']);
+
+    $second = callApi($app, 'POST', '/api/v1/orders', $orderBody, ['X-CSRF-Token' => $buyer['csrf'], 'Idempotency-Key' => 'referral-repeat-order-0002'], [$cookieName => $buyer['cookie']], '127.0.0.2');
+    assertSameValue(201, $second->status);
+    assertSameValue(0, $second->body['data']['order']['referralDiscount']);
+    $repeatCommission = $database->fetchOne('SELECT status, basis_cents, amount_cents FROM referral_commissions ORDER BY id DESC LIMIT 1');
+    assertSameValue('pending', $repeatCommission['status']);
+    assertSameValue(4900, (int) $repeatCommission['basis_cents']);
+    assertSameValue(735, (int) $repeatCommission['amount_cents']);
+
+    $linkInput['discountScope'] = 'every_purchase';
+    $updatedLink = callApi($app, 'PATCH', '/api/v1/admin/referrals/' . $createdLink->body['data']['referral']['id'], $linkInput, ['X-CSRF-Token' => $adminSession['csrf']], [$cookieName => $adminSession['cookie']]);
+    assertSameValue(200, $updatedLink->status);
+    assertSameValue('every_purchase', $updatedLink->body['data']['referral']['discountScope']);
+
+    $report = callApi($app, 'GET', '/api/v1/admin/referral-commissions', null, [], [$cookieName => $adminSession['cookie']]);
+    assertSameValue(200, $report->status);
+    assertSameValue(2, count($report->body['data']['commissions']));
+    $approved = array_values(array_filter($report->body['data']['commissions'], static fn (array $row): bool => $row['status'] === 'approved'));
+    assertSameValue(1, count($approved));
+    $paid = callApi($app, 'PATCH', '/api/v1/admin/referral-commissions/' . $approved[0]['id'], ['status' => 'paid', 'note' => 'August partner payout'], ['X-CSRF-Token' => $adminSession['csrf']], [$cookieName => $adminSession['cookie']]);
+    assertSameValue(200, $paid->status);
+    assertSameValue('paid', $paid->body['data']['commission']['status']);
 });
 
 test('canonical bundle order reserves stock and expiry restores inventory and promo once', function () use ($app, $config, $database, $cookieName, &$adminSession, &$customerSession): void {

@@ -9,6 +9,7 @@ import {
   ChevronDown,
   ImagePlus,
   LayoutDashboard,
+  Link2,
   Leaf,
   LockKeyhole,
   LogOut,
@@ -52,6 +53,8 @@ import type {
   StoreSettings,
   StaffMember,
   PaymentMethod,
+  ReferralCommission,
+  ReferralLink,
 } from "../store-types";
 
 type Props = {
@@ -94,6 +97,7 @@ const navItems = [
   ["Mix & Match", Sparkles],
   ["Customers", Users],
   ["Promo Codes", Tag],
+  ["Referrals", Link2],
   ["Enquiries", MessageCircle],
   ["Staff Access", UserCog],
   ["Store Settings", Settings],
@@ -144,6 +148,17 @@ const blankPromo: Promo = {
   maximumDiscount: 0,
   usageLimit: undefined,
   perCustomerLimit: undefined,
+  active: true,
+};
+const blankReferral: ReferralLink = {
+  id: "",
+  code: "",
+  name: "",
+  referrerUserId: "",
+  discountPercent: 15,
+  discountScope: "first_purchase",
+  commissionPercent: 15,
+  attributionDays: 30,
   active: true,
 };
 
@@ -223,6 +238,8 @@ export default function AdminDashboard(props: Props) {
   const [orders, setOrders] = useState<StoreOrder[]>([]);
   const [customers, setCustomers] = useState<AdminCustomer[]>([]);
   const [promos, setPromos] = useState<Promo[]>([]);
+  const [referrals, setReferrals] = useState<ReferralLink[]>([]);
+  const [commissions, setCommissions] = useState<ReferralCommission[]>([]);
   const [enquiries, setEnquiries] = useState<Enquiry[]>([]);
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const [dashboard, setDashboard] = useState<DashboardData>({});
@@ -234,6 +251,7 @@ export default function AdminDashboard(props: Props) {
   const [productEditor, setProductEditor] = useState<Product | null>(null);
   const [slideEditor, setSlideEditor] = useState<Slide | null>(null);
   const [promoEditor, setPromoEditor] = useState<Promo | null>(null);
+  const [referralEditor, setReferralEditor] = useState<ReferralLink | null>(null);
   const [activeEnquiryId, setActiveEnquiryId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -254,6 +272,8 @@ export default function AdminDashboard(props: Props) {
           apiRequest<unknown>("/admin/orders"),
           apiRequest<unknown>("/admin/customers"),
           apiRequest<unknown>("/admin/promos"),
+          apiRequest<unknown>("/admin/referrals"),
+          apiRequest<unknown>("/admin/referral-commissions"),
           apiRequest<unknown>("/admin/enquiries"),
           isOwner ? apiRequest<unknown>("/admin/staff") : Promise.resolve({ staff: [] }),
         ]);
@@ -269,6 +289,8 @@ export default function AdminDashboard(props: Props) {
           orderResult,
           customerResult,
           promoResult,
+          referralResult,
+          commissionResult,
           enquiryResult,
           staffResult,
         ] = results;
@@ -324,6 +346,10 @@ export default function AdminDashboard(props: Props) {
           );
         if (promoResult.status === "fulfilled")
           setPromos(listFrom<Promo>(promoResult.value, ["promos", "items"]));
+        if (referralResult.status === "fulfilled")
+          setReferrals(listFrom<ReferralLink>(referralResult.value, ["referrals", "items"]));
+        if (commissionResult.status === "fulfilled")
+          setCommissions(listFrom<ReferralCommission>(commissionResult.value, ["commissions", "items"]));
         if (enquiryResult.status === "fulfilled")
           setEnquiries(
             listFrom<Enquiry>(enquiryResult.value, ["enquiries", "items"]),
@@ -359,7 +385,7 @@ export default function AdminDashboard(props: Props) {
     }
   };
 
-  const sectionPermission: Record<string, string> = { Dashboard: "dashboard", Orders: "orders", Products: "content", Sliders: "content", "Mix & Match": "content", Customers: "customers", "Promo Codes": "promos", Enquiries: "enquiries" };
+  const sectionPermission: Record<string, string> = { Dashboard: "dashboard", Orders: "orders", Products: "content", Sliders: "content", "Mix & Match": "content", Customers: "customers", "Promo Codes": "promos", Referrals: "referrals", Enquiries: "enquiries" };
   const canOpen = (label: string) => {
     if (label === "Staff Access") return isOwner && !locked;
     if (label === "Store Settings") return isOwner || locked;
@@ -500,6 +526,51 @@ export default function AdminDashboard(props: Props) {
     if (locked || !window.confirm(`Delete ${promo.code}?`)) return;
     await apiRequest(`/admin/promos/${promo.id}`, { method: "DELETE" });
     setPromos((current) => current.filter((item) => item.id !== promo.id));
+  };
+
+  const saveReferral = async (draft: ReferralLink) => {
+    const creating = !draft.id;
+    const result = await apiRequest<unknown>(
+      creating ? "/admin/referrals" : `/admin/referrals/${draft.id}`,
+      { method: creating ? "POST" : "PATCH", body: draft as unknown as Record<string, unknown> },
+    );
+    const saved = itemFrom<ReferralLink>(result, ["referral"]);
+    setReferrals((current) => creating ? [saved, ...current] : current.map((link) => link.id === saved.id ? saved : link));
+    setReferralEditor(null);
+    setNotice(`${saved.code} referral link saved.`);
+  };
+
+  const deleteReferral = async (link: ReferralLink) => {
+    if (locked || !window.confirm(`Disable referral link ${link.code}?`)) return;
+    await apiRequest(`/admin/referrals/${link.id}`, { method: "DELETE" });
+    setReferrals((current) => current.map((item) => item.id === link.id ? { ...item, active: false } : item));
+    setNotice(`${link.code} has been disabled.`);
+  };
+
+  const updateCommission = async (commission: ReferralCommission, status: "paid" | "void") => {
+    if (!window.confirm(status === "paid" ? `Mark ${commission.orderNumber} commission as paid?` : `Void commission for ${commission.orderNumber}?`)) return;
+    const result = await apiRequest<unknown>(`/admin/referral-commissions/${commission.id}`, { method: "PATCH", body: { status } });
+    const saved = itemFrom<ReferralCommission>(result, ["commission"]);
+    setCommissions((current) => current.map((item) => item.id === saved.id ? saved : item));
+    setNotice(`Commission for ${commission.orderNumber} marked ${status}.`);
+  };
+
+  const exportCommissions = () => {
+    const cell = (value: unknown) => {
+      const raw = String(value ?? "");
+      const safe = /^\s*[=+\-@]/.test(raw) ? `'${raw}` : raw;
+      return `"${safe.replaceAll('"', '""')}"`;
+    };
+    const rows = [
+      ["Order", "Referral", "Referrer", "Customer", "Basis MYR", "Rate %", "Commission MYR", "Status", "Created"],
+      ...commissions.map((item) => [item.orderNumber, item.code, item.referrerName, item.customerName, item.basis.toFixed(2), item.ratePercent.toFixed(2), item.amount.toFixed(2), item.status, item.createdAt]),
+    ];
+    const url = URL.createObjectURL(new Blob([rows.map((row) => row.map(cell).join(",")).join("\n")], { type: "text/csv;charset=utf-8" }));
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = "3rnco-referral-commissions.csv";
+    anchor.click();
+    URL.revokeObjectURL(url);
   };
 
   const updateOrderStatus = async (order: StoreOrder, status: string) => {
@@ -986,6 +1057,18 @@ export default function AdminDashboard(props: Props) {
               )}
             </>
           )}
+          {section === "Referrals" && (
+            <ReferralsView
+              referrals={referrals}
+              commissions={commissions}
+              locked={locked}
+              onCreate={() => setReferralEditor({ ...blankReferral, referrerUserId: customers[0]?.id || "" })}
+              onEdit={setReferralEditor}
+              onDisable={deleteReferral}
+              onCommission={updateCommission}
+              onExport={exportCommissions}
+            />
+          )}
           {section === "Enquiries" && (
             <>
               <AdminHeading
@@ -1047,6 +1130,14 @@ export default function AdminDashboard(props: Props) {
           promo={promoEditor}
           onClose={() => setPromoEditor(null)}
           onSave={savePromo}
+        />
+      )}
+      {referralEditor && (
+        <ReferralEditor
+          referral={referralEditor}
+          customers={customers}
+          onClose={() => setReferralEditor(null)}
+          onSave={saveReferral}
         />
       )}
     </main>
@@ -1484,7 +1575,7 @@ function Status({ status }: { status: string }) {
 
 const staffPermissionOptions = [
   ["dashboard", "Dashboard"], ["orders", "Orders & payment verification"], ["customers", "Customers"],
-  ["content", "Products, sliders & Mix and Match"], ["promos", "Promo codes"], ["enquiries", "Enquiries"],
+  ["content", "Products, sliders & Mix and Match"], ["promos", "Promo codes"], ["referrals", "Referral links & commissions"], ["enquiries", "Enquiries"],
 ] as const;
 
 function PaymentMethodEditor({ method, disabled, onChange }: { method: PaymentMethod; disabled: boolean; onChange: (method: PaymentMethod) => void }) {
@@ -2511,6 +2602,117 @@ function BundleAdminEditor({
       </button>
     </form>
   );
+}
+
+function ReferralsView({
+  referrals,
+  commissions,
+  locked,
+  onCreate,
+  onEdit,
+  onDisable,
+  onCommission,
+  onExport,
+}: {
+  referrals: ReferralLink[];
+  commissions: ReferralCommission[];
+  locked: boolean;
+  onCreate: () => void;
+  onEdit: (link: ReferralLink) => void;
+  onDisable: (link: ReferralLink) => Promise<void>;
+  onCommission: (commission: ReferralCommission, status: "paid" | "void") => Promise<void>;
+  onExport: () => void;
+}) {
+  const approved = commissions.filter((item) => item.status === "approved").reduce((sum, item) => sum + item.amount, 0);
+  const paid = commissions.filter((item) => item.status === "paid").reduce((sum, item) => sum + item.amount, 0);
+  const revenue = referrals.reduce((sum, link) => sum + Number(link.paidRevenue || 0), 0);
+  const copyLink = async (code: string) => navigator.clipboard.writeText(`${window.location.origin}/?ref=${code}`);
+  return (
+    <>
+      <AdminHeading eyebrow="Referral commerce" title="Referral links & commissions" copy="Set a shopper discount and partner commission independently for every referral link.">
+        <button className="button button--light" onClick={onExport} disabled={!commissions.length}>Export report <ArrowUpRight size={15} /></button>
+        <button className="button button--dark" onClick={onCreate} disabled={locked}><Plus size={16} />Create referral</button>
+      </AdminHeading>
+      <div className="referral-kpis">
+        <article><span>Attributed revenue</span><strong>RM{revenue.toFixed(2)}</strong><small>Paid referred orders</small></article>
+        <article><span>Approved to pay</span><strong>RM{approved.toFixed(2)}</strong><small>Verified commission</small></article>
+        <article><span>Paid commission</span><strong>RM{paid.toFixed(2)}</strong><small>Completed payouts</small></article>
+        <article><span>Downlines</span><strong>{referrals.reduce((sum, link) => sum + Number(link.downlines || 0), 0)}</strong><small>Attributed customers</small></article>
+      </div>
+      {!referrals.length ? (
+        <AdminEmpty icon={<Link2 />} title="No referral links yet." copy="Create the first link, choose its owner, discount rule and commission rate." />
+      ) : (
+        <div className="referral-link-grid">
+          {referrals.map((link) => (
+            <article key={link.id} className={!link.active ? "is-inactive" : ""}>
+              <header><div><span>{link.active ? "Active link" : "Inactive"}</span><h2>?ref={link.code}</h2></div><b>{link.commissionPercent}% commission</b></header>
+              <p>{link.name}</p>
+              <dl>
+                <div><dt>Owner</dt><dd>{link.referrerName || link.referrerEmail}</dd></div>
+                <div><dt>Shopper saving</dt><dd>{link.discountPercent}% · {link.discountScope === "first_purchase" ? "first purchase" : link.discountScope === "every_purchase" ? "every purchase" : "none"}</dd></div>
+                <div><dt>Visits / downlines</dt><dd>{link.visits || 0} / {link.downlines || 0}</dd></div>
+                <div><dt>Paid orders</dt><dd>{link.paidOrders || 0}</dd></div>
+              </dl>
+              <footer>
+                <button onClick={() => void copyLink(link.code)}><Link2 size={14} />Copy link</button>
+                <button onClick={() => onEdit(link)} disabled={locked}><Pencil size={14} />Edit</button>
+                {link.active && <button onClick={() => void onDisable(link)} disabled={locked}><Trash2 size={14} />Disable</button>}
+              </footer>
+            </article>
+          ))}
+        </div>
+      )}
+      <section className="referral-report">
+        <div><p className="eyebrow">Commission ledger</p><h2>Order-by-order report</h2><p>Pending entries become approved only after payment is verified. Historical rates stay fixed.</p></div>
+        {!commissions.length ? <p className="referral-report__empty">Commission entries will appear after an attributed order is placed.</p> : (
+          <div className="referral-commission-table" role="table" aria-label="Referral commission report">
+            <div role="row"><b>Order</b><b>Partner / customer</b><b>Basis</b><b>Commission</b><b>Status</b><b>Action</b></div>
+            {commissions.map((item) => <div role="row" key={item.id}>
+              <span><b>{item.orderNumber}</b><small>?ref={item.code}</small></span>
+              <span><b>{item.referrerName}</b><small>{item.customerName}</small></span>
+              <span>RM{item.basis.toFixed(2)}</span>
+              <span><b>RM{item.amount.toFixed(2)}</b><small>{item.ratePercent}%</small></span>
+              <span><i className={`commission-status commission-status--${item.status}`}>{item.status}</i></span>
+              <span className="commission-actions">{item.status === "approved" && <button onClick={() => void onCommission(item, "paid")} disabled={locked}>Mark paid</button>}{["pending", "approved"].includes(item.status) && <button onClick={() => void onCommission(item, "void")} disabled={locked}>Void</button>}</span>
+            </div>)}
+          </div>
+        )}
+      </section>
+    </>
+  );
+}
+
+function ReferralEditor({ referral, customers, onClose, onSave }: { referral: ReferralLink; customers: AdminCustomer[]; onClose: () => void; onSave: (link: ReferralLink) => Promise<void> }) {
+  const [draft, setDraft] = useState(referral);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const save = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setBusy(true);
+    setError("");
+    try { await onSave({ ...draft, code: draft.code.trim().toLowerCase() }); }
+    catch (reason) { setError(errorMessage(reason)); }
+    finally { setBusy(false); }
+  };
+  return <EditorShell title={referral.id ? `Edit ?ref=${referral.code}` : "Create referral link"} onClose={onClose}>
+    <form className="editor-form referral-editor-form" onSubmit={save}>
+      <div className="referral-editor-intro"><Link2 /><div><b>One link, two independent rates</b><p>The discount rewards the shopper. Commission rewards the link owner after payment is verified.</p></div></div>
+      <div className="form-grid">
+        <label className="full">Referral owner<select value={draft.referrerUserId} onChange={(event) => setDraft({ ...draft, referrerUserId: event.target.value })} required><option value="">Choose a customer</option>{customers.map((customer) => <option value={customer.id} key={customer.id}>{customer.fullName} · {customer.email}</option>)}</select></label>
+        <label>Link code<input value={draft.code} onChange={(event) => setDraft({ ...draft, code: event.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, "") })} placeholder="skybutter" required /></label>
+        <label>Internal name<input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="Skybutter partner link" required /></label>
+        <label>Shopper discount %<input type="number" min="0" max="100" step="0.01" value={draft.discountPercent} onChange={(event) => setDraft({ ...draft, discountPercent: Number(event.target.value) })} required /></label>
+        <label>Discount applies to<select value={draft.discountScope} onChange={(event) => setDraft({ ...draft, discountScope: event.target.value })}><option value="first_purchase">First purchase only</option><option value="every_purchase">Every purchase</option><option value="none">No shopper discount</option></select></label>
+        <label>Partner commission %<input type="number" min="0" max="100" step="0.01" value={draft.commissionPercent} onChange={(event) => setDraft({ ...draft, commissionPercent: Number(event.target.value) })} required /></label>
+        <label>Attribution window (days)<input type="number" min="1" max="365" value={draft.attributionDays} onChange={(event) => setDraft({ ...draft, attributionDays: Number(event.target.value) })} required /></label>
+        <label>Starts at<input type="datetime-local" value={draft.startsAt?.slice(0, 16) || ""} onChange={(event) => setDraft({ ...draft, startsAt: event.target.value || undefined })} /></label>
+        <label>Ends at<input type="datetime-local" value={draft.endsAt?.slice(0, 16) || ""} onChange={(event) => setDraft({ ...draft, endsAt: event.target.value || undefined })} /></label>
+      </div>
+      <label className="check-field"><input type="checkbox" checked={draft.active} onChange={(event) => setDraft({ ...draft, active: event.target.checked })} />Referral link is active</label>
+      {error && <p className="form-alert">{error}</p>}
+      <div className="editor-actions"><button type="button" className="button button--ghost" onClick={onClose}>Cancel</button><button className="button button--dark" disabled={busy || !customers.length}><Save size={15} />{busy ? "Saving…" : "Save referral"}</button></div>
+    </form>
+  </EditorShell>;
 }
 
 function PromoEditor({

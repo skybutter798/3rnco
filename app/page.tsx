@@ -15,6 +15,7 @@ import {
   Gift,
   House,
   Leaf,
+  Link2 as Link2Icon,
   Menu,
   Minus,
   Pause,
@@ -48,6 +49,7 @@ import type {
   GalleryItem,
   PaymentMethod,
   Product,
+  ReferralOffer,
   Slide,
   StorefrontPayload,
   StoreOrder,
@@ -487,6 +489,8 @@ export default function Home() {
   const [discount, setDiscount] = useState(0);
   const [promoShipping, setPromoShipping] = useState<number | null>(null);
   const [promoBusy, setPromoBusy] = useState(false);
+  const [referralCode, setReferralCode] = useState("");
+  const [referralOffer, setReferralOffer] = useState<(ReferralOffer & { eligible?: boolean }) | null>(null);
   const [toast, setToast] = useState("");
   const [navOpen, setNavOpen] = useState(false);
   const [headerSolid, setHeaderSolid] = useState(false);
@@ -572,13 +576,17 @@ export default function Home() {
         : bundle.discountValue,
     );
   }, [bundleSelection, bundles, cart, products]);
+  const referralDiscount = useMemo(() => {
+    if (!referralOffer || referralOffer.eligible === false || referralOffer.discountScope === "none") return 0;
+    return Math.max(0, (subtotal - bundleDiscount) * Number(referralOffer.discountPercent || 0) / 100);
+  }, [bundleDiscount, referralOffer, subtotal]);
 
   const shipping =
     promoShipping ??
     (subtotal > 0 && subtotal < settings.shippingThreshold
       ? settings.shippingFee
       : 0);
-  const total = Math.max(0, subtotal - discount - bundleDiscount + shipping);
+  const total = Math.max(0, subtotal - discount - referralDiscount - bundleDiscount + shipping);
   const activePaymentMethods = useMemo(
     () =>
       (settings.paymentMethods || [])
@@ -671,6 +679,34 @@ export default function Home() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!sessionChecked) return;
+    const params = new URLSearchParams(window.location.search);
+    const fromUrl = params.get("ref")?.trim().toLowerCase() || "";
+    let code = fromUrl;
+    if (!code) {
+      try {
+        const stored = JSON.parse(window.localStorage.getItem("3rnco_referral") || "null") as { code?: string; expiresAt?: number } | null;
+        if (stored?.code && Number(stored.expiresAt || 0) > Date.now()) code = stored.code;
+      } catch { /* ignore invalid browser storage */ }
+    }
+    if (!code) return;
+    apiRequest<ReferralOffer & { eligible?: boolean }>("/referrals/resolve", { method: "POST", body: { code } })
+      .then((offer) => {
+        setReferralCode(offer.code);
+        setReferralOffer(offer);
+        window.localStorage.setItem("3rnco_referral", JSON.stringify({
+          code: offer.code,
+          expiresAt: Date.now() + Math.max(1, Number(offer.attributionDays || 30)) * 24 * 60 * 60 * 1000,
+        }));
+      })
+      .catch(() => {
+        setReferralCode("");
+        setReferralOffer(null);
+        window.localStorage.removeItem("3rnco_referral");
+      });
+  }, [sessionChecked, sessionUser?.id]);
 
   useEffect(() => {
     const applyBrowserRoute = () => {
@@ -1039,6 +1075,7 @@ export default function Home() {
         },
         paymentMethod: "manual_confirmation",
         promoCode: promoCode || undefined,
+        referralCode: referralCode || undefined,
         bundleMetadata: bundleSelection
           ? [
               {
@@ -1268,7 +1305,7 @@ export default function Home() {
         Skip to main content
       </a>
       {view === "store" ? (
-        <main ref={mainRef} className="site-shell">
+        <main ref={mainRef} className={`site-shell ${referralOffer ? "site-shell--referral" : ""}`}>
           <div className="top-note">
             <p>
               <Leaf size={13} /> {settings.announcement}
@@ -1289,6 +1326,13 @@ export default function Home() {
               >
                 Contact care <ArrowUpRight size={13} />
               </a>
+            </div>
+          )}
+          {referralOffer && (
+            <div className="referral-welcome" role="status">
+              <span><Link2Icon /><b>Welcome through {referralOffer.referrerName}</b></span>
+              <p>{referralOffer.eligible === false ? "This referral remains connected to your account; the first-purchase saving has already been used." : referralOffer.message}</p>
+              <code>?ref={referralOffer.code}</code>
             </div>
           )}
 
@@ -2150,6 +2194,9 @@ export default function Home() {
                       <b>−{money(discount)}</b>
                     </p>
                   )}
+                  {referralDiscount > 0 && (
+                    <p className="discount-row"><span>Referral · {referralCode}</span><b>−{money(referralDiscount)}</b></p>
+                  )}
                   <p>
                     <span>Delivery</span>
                     <b>{shipping ? money(shipping) : "Complimentary"}</b>
@@ -2359,8 +2406,10 @@ export default function Home() {
           subtotal={subtotal}
           shipping={shipping}
           discount={discount}
+          referralDiscount={referralDiscount}
           bundleDiscount={bundleDiscount}
           promoCode={promoCode}
+          referralCode={referralCode}
           total={total}
           paymentMethods={activePaymentMethods}
           paymentMethodId={effectiveCheckoutPaymentMethodId}
@@ -2554,6 +2603,7 @@ export default function Home() {
               window.history.pushState(null, "", "/");
           }}
           settings={settings}
+          referralCode={referralCode}
         />
       )}
       {builderBundle && (
@@ -2602,8 +2652,10 @@ type CheckoutProps = {
   subtotal: number;
   shipping: number;
   discount: number;
+  referralDiscount: number;
   bundleDiscount: number;
   promoCode: string;
+  referralCode: string;
   total: number;
   paymentMethods: PaymentMethod[];
   paymentMethodId: string;
@@ -2632,8 +2684,10 @@ function Checkout({
   subtotal,
   shipping,
   discount,
+  referralDiscount,
   bundleDiscount,
   promoCode,
+  referralCode,
   total,
   paymentMethods,
   paymentMethodId,
@@ -3122,6 +3176,9 @@ function Checkout({
                   <span>{promoCode}</span>
                   <b>−{money(discount)}</b>
                 </p>
+              )}
+              {referralDiscount > 0 && (
+                <p className="discount-row"><span>Referral · {referralCode}</span><b>−{money(referralDiscount)}</b></p>
               )}
               <p>
                 <span>Delivery</span>

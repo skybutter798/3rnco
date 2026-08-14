@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Rnco\Config;
 use Rnco\Database;
 use Rnco\OrderService;
+use Rnco\ReferralService;
 use Rnco\StoreRepository;
 
 if (PHP_SAPI !== 'cli') {
@@ -31,7 +32,7 @@ try {
             $limit = (int) $value;
         }
     }
-    $released = (new OrderService($database, new StoreRepository($database), $config))->releaseExpiredReservations($limit);
+    $released = (new OrderService($database, new StoreRepository($database), $config, new ReferralService($database)))->releaseExpiredReservations($limit);
     fwrite(STDOUT, sprintf("Released %d expired order reservation(s).\n", $released));
     exit(0);
 } catch (Throwable $exception) {

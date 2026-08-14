@@ -189,9 +189,61 @@ export type StoreOrder = {
   subtotal?: number;
   shipping?: number;
   discount?: number;
+  referralCode?: string | null;
+  referralDiscount?: number;
   lines?: OrderLine[];
   items?: string;
   paymentReceipt?: PaymentReceipt | null;
+};
+
+export type ReferralLink = {
+  id: string;
+  code: string;
+  name: string;
+  referrerUserId: string;
+  referrerName?: string;
+  referrerEmail?: string;
+  discountPercent: number;
+  discountScope: "none" | "first_purchase" | "every_purchase" | string;
+  commissionPercent: number;
+  attributionDays: number;
+  active: boolean;
+  startsAt?: string;
+  endsAt?: string;
+  visits?: number;
+  downlines?: number;
+  paidOrders?: number;
+  paidRevenue?: number;
+  pendingCommission?: number;
+  approvedCommission?: number;
+  paidCommission?: number;
+};
+
+export type ReferralCommission = {
+  id: string;
+  code: string;
+  orderId: string;
+  orderNumber: string;
+  referrerName: string;
+  customerName: string;
+  basis: number;
+  ratePercent: number;
+  amount: number;
+  status: "pending" | "approved" | "paid" | "void" | string;
+  note?: string | null;
+  createdAt: string;
+  approvedAt?: string;
+  paidAt?: string;
+};
+
+export type ReferralOffer = {
+  code: string;
+  name: string;
+  referrerName: string;
+  discountPercent: number;
+  discountScope: "none" | "first_purchase" | "every_purchase" | string;
+  attributionDays: number;
+  message: string;
 };
 
 export type Promo = {

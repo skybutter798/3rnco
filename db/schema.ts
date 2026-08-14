@@ -428,6 +428,46 @@ export const promotions = sqliteTable("promotions", {
   ...timestamps,
 }, (table) => [uniqueIndex("uq_promotions_code").on(table.code)]);
 
+export const referralLinks = sqliteTable("referral_links", {
+  id: text("id").primaryKey(),
+  code: text("code").notNull(),
+  name: text("name").notNull(),
+  referrerUserId: text("referrer_user_id").notNull().references(() => users.id, { onDelete: "restrict" }),
+  discountBasisPoints: integer("discount_basis_points").notNull().default(0),
+  discountScope: text("discount_scope").notNull().default("FIRST_PURCHASE"),
+  commissionBasisPoints: integer("commission_basis_points").notNull().default(0),
+  attributionDays: integer("attribution_days").notNull().default(30),
+  startsAt: integer("starts_at"),
+  endsAt: integer("ends_at"),
+  status: text("status").notNull().default("ACTIVE"),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex("uq_referral_links_code").on(table.code),
+  index("idx_referral_links_referrer").on(table.referrerUserId, table.status),
+  check("ck_referral_links_discount", sql`${table.discountBasisPoints} between 0 and 10000`),
+  check("ck_referral_links_commission", sql`${table.commissionBasisPoints} between 0 and 10000`),
+  check("ck_referral_links_scope", sql`${table.discountScope} in ('NONE', 'FIRST_PURCHASE', 'EVERY_PURCHASE')`),
+]);
+
+export const customerReferrals = sqliteTable("customer_referrals", {
+  userId: text("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  referralLinkId: text("referral_link_id").notNull().references(() => referralLinks.id, { onDelete: "restrict" }),
+  referrerUserId: text("referrer_user_id").notNull().references(() => users.id, { onDelete: "restrict" }),
+  attributionSource: text("attribution_source").notNull().default("ORDER"),
+  attributedAt: integer("attributed_at").notNull().default(sql`(unixepoch())`),
+}, (table) => [
+  index("idx_customer_referrals_link").on(table.referralLinkId, table.attributedAt),
+  index("idx_customer_referrals_referrer").on(table.referrerUserId, table.attributedAt),
+]);
+
+export const referralVisits = sqliteTable("referral_visits", {
+  id: text("id").primaryKey(),
+  referralLinkId: text("referral_link_id").notNull().references(() => referralLinks.id, { onDelete: "cascade" }),
+  visitorHash: text("visitor_hash"),
+  convertedUserId: text("converted_user_id").references(() => users.id, { onDelete: "set null" }),
+  occurredAt: integer("occurred_at").notNull().default(sql`(unixepoch())`),
+}, (table) => [index("idx_referral_visits_link_date").on(table.referralLinkId, table.occurredAt)]);
+
 export const promotionProducts = sqliteTable("promotion_products", {
   promotionId: text("promotion_id").notNull().references(() => promotions.id, { onDelete: "cascade" }),
   productId: text("product_id").notNull().references(() => products.id, { onDelete: "cascade" }),
@@ -451,12 +491,17 @@ export const orders = sqliteTable("orders", {
   taxMinor: integer("tax_minor").notNull().default(0),
   totalMinor: integer("total_minor").notNull(),
   promotionId: text("promotion_id").references(() => promotions.id, { onDelete: "set null" }),
+  referralLinkId: text("referral_link_id").references(() => referralLinks.id, { onDelete: "set null" }),
+  referrerUserId: text("referrer_user_id").references(() => users.id, { onDelete: "set null" }),
+  referralCode: text("referral_code"),
+  referralDiscountMinor: integer("referral_discount_minor").notNull().default(0),
   placedAt: integer("placed_at").notNull().default(sql`(unixepoch())`),
   updatedAt: integer("updated_at").notNull().default(sql`(unixepoch())`),
 }, (table) => [
   uniqueIndex("uq_orders_order_number").on(table.orderNumber),
   index("idx_orders_user_placed").on(table.userId, table.placedAt),
   index("idx_orders_status_placed").on(table.status, table.placedAt),
+  index("idx_orders_referral_placed").on(table.referralLinkId, table.placedAt),
 ]);
 
 export const orderAddresses = sqliteTable("order_addresses", {
@@ -517,6 +562,28 @@ export const promotionRedemptions = sqliteTable("promotion_redemptions", {
 }, (table) => [
   uniqueIndex("uq_promotion_redemptions_order").on(table.orderId),
   index("idx_promotion_redemptions_user").on(table.promotionId, table.userId),
+]);
+
+export const referralCommissions = sqliteTable("referral_commissions", {
+  id: text("id").primaryKey(),
+  referralLinkId: text("referral_link_id").notNull().references(() => referralLinks.id, { onDelete: "restrict" }),
+  orderId: text("order_id").notNull().references(() => orders.id, { onDelete: "cascade" }),
+  referrerUserId: text("referrer_user_id").notNull().references(() => users.id, { onDelete: "restrict" }),
+  referredUserId: text("referred_user_id").notNull().references(() => users.id, { onDelete: "restrict" }),
+  basisMinor: integer("basis_minor").notNull(),
+  rateBasisPoints: integer("rate_basis_points").notNull(),
+  amountMinor: integer("amount_minor").notNull(),
+  status: text("status").notNull().default("PENDING"),
+  approvedAt: integer("approved_at"),
+  paidAt: integer("paid_at"),
+  voidedAt: integer("voided_at"),
+  note: text("note"),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex("uq_referral_commissions_order").on(table.orderId),
+  index("idx_referral_commissions_referrer_status").on(table.referrerUserId, table.status, table.createdAt),
+  index("idx_referral_commissions_link_created").on(table.referralLinkId, table.createdAt),
+  check("ck_referral_commissions_status", sql`${table.status} in ('PENDING', 'APPROVED', 'PAID', 'VOID')`),
 ]);
 
 export const paymentAttempts = sqliteTable("payment_attempts", {

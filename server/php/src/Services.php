@@ -276,12 +276,261 @@ final class StoreRepository
     }
 }
 
+final class ReferralService
+{
+    public function __construct(private readonly Database $database)
+    {
+    }
+
+    public function normalizeCode(mixed $value): ?string
+    {
+        if ($value === null || $value === '') return null;
+        $code = strtolower(trim((string) $value));
+        if (!preg_match('/^[a-z0-9_-]{2,50}$/', $code)) {
+            throw new ApiException('REFERRAL_INVALID', 'That referral link is not valid.', 422);
+        }
+        return $code;
+    }
+
+    /** @return array<string,mixed> */
+    public function resolve(string $code): array
+    {
+        $nameExpression = $this->database->isMysql()
+            ? "COALESCE(NULLIF(u.display_name, ''), NULLIF(TRIM(CONCAT(u.first_name, ' ', u.last_name)), ''), u.email)"
+            : "COALESCE(NULLIF(u.display_name, ''), NULLIF(TRIM(u.first_name || ' ' || u.last_name), ''), u.email)";
+        $row = $this->database->fetchOne(
+            "SELECT rl.*, {$nameExpression} AS referrer_name, u.email AS referrer_email " .
+            'FROM referral_links rl JOIN users u ON u.id = rl.referrer_user_id WHERE rl.code = ?',
+            [$this->normalizeCode($code)],
+        );
+        $now = Security::now();
+        if ($row === null || !(bool) $row['is_active'] || ($row['starts_at'] !== null && $row['starts_at'] > $now) || ($row['ends_at'] !== null && $row['ends_at'] < $now)) {
+            throw new ApiException('REFERRAL_NOT_AVAILABLE', 'That referral link is not currently available.', 404);
+        }
+        return $row;
+    }
+
+    /** @return array<string,mixed> */
+    public function preview(string $code, Request $request, ?int $userId): array
+    {
+        $link = $this->resolve($code);
+        $this->database->execute(
+            'INSERT INTO referral_visits (public_id, referral_link_id, visitor_hash, converted_user_id, occurred_at) VALUES (?, ?, ?, ?, ?)',
+            [Security::uuid(), $link['id'], hash('sha256', $request->remoteAddress . '|' . ($request->header('user-agent') ?? '')), $userId, Security::now()],
+        );
+        $discount = ((int) $link['discount_basis_points']) / 100;
+        $eligible = $discount > 0 && $link['discount_scope'] !== 'none';
+        if ($userId !== null) {
+            if ((int) $link['referrer_user_id'] === $userId) $eligible = false;
+            elseif ($eligible && $link['discount_scope'] === 'first_purchase') {
+                $prior = $this->database->fetchOne("SELECT COUNT(*) AS aggregate FROM orders WHERE customer_id = ? AND status <> 'cancelled' AND deleted_at IS NULL", [$userId]);
+                $eligible = (int) ($prior['aggregate'] ?? 0) === 0;
+            }
+        }
+        return [
+            'code' => (string) $link['code'], 'name' => (string) $link['name'], 'referrerName' => (string) $link['referrer_name'],
+            'discountPercent' => $discount, 'discountScope' => (string) $link['discount_scope'],
+            'attributionDays' => (int) $link['attribution_days'],
+            'eligible' => $eligible,
+            'message' => $discount > 0
+                ? $discount . '% referral saving ' . ($link['discount_scope'] === 'first_purchase' ? 'on your first purchase.' : 'on every purchase.')
+                : 'You are shopping through ' . $link['referrer_name'] . "'s referral link.",
+        ];
+    }
+
+    /** @return array{link:?array<string,mixed>,discount_cents:int} */
+    public function forOrder(int $userId, mixed $codeValue, int $subtotal, int $bundleDiscount): array
+    {
+        $link = $this->database->fetchOne(
+            'SELECT rl.* FROM customer_referrals cr JOIN referral_links rl ON rl.id = cr.referral_link_id WHERE cr.user_id = ?',
+            [$userId],
+        );
+        $code = $this->normalizeCode($codeValue);
+        if ($link === null && $code !== null) {
+            $link = $this->resolve($code);
+            if ((int) $link['referrer_user_id'] === $userId) {
+                throw new ApiException('SELF_REFERRAL_NOT_ALLOWED', 'You cannot use your own referral link.', 422);
+            }
+            $this->database->execute(
+                'INSERT INTO customer_referrals (user_id, referral_link_id, referrer_user_id, attribution_source, attributed_at) VALUES (?, ?, ?, ?, ?)',
+                [$userId, $link['id'], $link['referrer_user_id'], 'order', Security::now()],
+            );
+        }
+        if ($link === null) return ['link' => null, 'discount_cents' => 0];
+        $now = Security::now();
+        $eligible = (bool) $link['is_active'] && ($link['starts_at'] === null || $link['starts_at'] <= $now)
+            && ($link['ends_at'] === null || $link['ends_at'] >= $now) && $link['discount_scope'] !== 'none'
+            && (int) $link['discount_basis_points'] > 0;
+        if ($eligible && $link['discount_scope'] === 'first_purchase') {
+            $prior = $this->database->fetchOne(
+                "SELECT COUNT(*) AS aggregate FROM orders WHERE customer_id = ? AND status <> 'cancelled' AND deleted_at IS NULL",
+                [$userId],
+            );
+            $eligible = (int) ($prior['aggregate'] ?? 0) === 0;
+        }
+        $eligibleSubtotal = max(0, $subtotal - $bundleDiscount);
+        $discount = $eligible ? min($eligibleSubtotal, (int) round($eligibleSubtotal * ((int) $link['discount_basis_points']) / 10000, 0, PHP_ROUND_HALF_UP)) : 0;
+        return ['link' => $link, 'discount_cents' => $discount];
+    }
+
+    /** @param array<string,mixed> $link */
+    public function createCommission(array $link, int $orderId, int $userId, int $basis): void
+    {
+        $rate = (int) $link['commission_basis_points'];
+        if ($rate <= 0) return;
+        $now = Security::now();
+        $amount = (int) round(max(0, $basis) * $rate / 10000, 0, PHP_ROUND_HALF_UP);
+        $this->database->execute(
+            'INSERT INTO referral_commissions (public_id, referral_link_id, order_id, referrer_user_id, referred_user_id, basis_cents, rate_basis_points, amount_cents, status, approved_at, paid_at, voided_at, note, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [Security::uuid(), $link['id'], $orderId, $link['referrer_user_id'], $userId, max(0, $basis), $rate, $amount, 'pending', null, null, null, null, $now, $now],
+        );
+    }
+
+    public function transitionOrder(int $orderId, string $status): void
+    {
+        $now = Security::now();
+        if (in_array($status, ['payment_confirmed', 'processing', 'packing', 'shipped', 'delivered'], true)) {
+            $this->database->execute("UPDATE referral_commissions SET status = 'approved', approved_at = COALESCE(approved_at, ?), updated_at = ? WHERE order_id = ? AND status = 'pending'", [$now, $now, $orderId]);
+        } elseif ($status === 'cancelled') {
+            $this->database->execute("UPDATE referral_commissions SET status = 'void', voided_at = ?, note = COALESCE(note, 'Order cancelled'), updated_at = ? WHERE order_id = ? AND status IN ('pending','approved')", [$now, $now, $orderId]);
+        }
+    }
+
+    /** @return list<array<string,mixed>> */
+    public function links(): array
+    {
+        $nameExpression = $this->database->isMysql()
+            ? "COALESCE(NULLIF(u.display_name, ''), NULLIF(TRIM(CONCAT(u.first_name, ' ', u.last_name)), ''), u.email)"
+            : "COALESCE(NULLIF(u.display_name, ''), TRIM(u.first_name || ' ' || u.last_name), u.email)";
+        $rows = $this->database->fetchAll(
+            "SELECT rl.*, u.public_id AS referrer_public_id, {$nameExpression} AS referrer_name, u.email AS referrer_email, " .
+            '(SELECT COUNT(*) FROM referral_visits rv WHERE rv.referral_link_id = rl.id) AS visits, ' .
+            '(SELECT COUNT(*) FROM customer_referrals cr WHERE cr.referral_link_id = rl.id) AS downlines, ' .
+            "(SELECT COUNT(*) FROM orders o WHERE o.referral_link_id = rl.id AND o.payment_status = 'confirmed' AND o.deleted_at IS NULL) AS paid_orders, " .
+            "(SELECT COALESCE(SUM(o.total_cents), 0) FROM orders o WHERE o.referral_link_id = rl.id AND o.payment_status = 'confirmed' AND o.deleted_at IS NULL) AS paid_revenue_cents, " .
+            "(SELECT COALESCE(SUM(rc.amount_cents), 0) FROM referral_commissions rc WHERE rc.referral_link_id = rl.id AND rc.status = 'pending') AS pending_cents, " .
+            "(SELECT COALESCE(SUM(rc.amount_cents), 0) FROM referral_commissions rc WHERE rc.referral_link_id = rl.id AND rc.status = 'approved') AS approved_cents, " .
+            "(SELECT COALESCE(SUM(rc.amount_cents), 0) FROM referral_commissions rc WHERE rc.referral_link_id = rl.id AND rc.status = 'paid') AS paid_cents " .
+            'FROM referral_links rl JOIN users u ON u.id = rl.referrer_user_id ORDER BY rl.created_at DESC, rl.id DESC',
+        );
+        return array_map(fn (array $row): array => $this->mapLink($row), $rows);
+    }
+
+    /** @param array<string,mixed> $input @return array<string,mixed> */
+    public function save(?string $publicId, array $input): array
+    {
+        Validator::requireValid($input, [
+            'code' => 'required|string|min:2|max:50', 'name' => 'required|string|min:2|max:160', 'referrerUserId' => 'required|string|max:64',
+            'discountPercent' => 'required|numeric', 'discountScope' => 'required|string|in:none,first_purchase,every_purchase',
+            'commissionPercent' => 'required|numeric', 'attributionDays' => 'required|numeric', 'startsAt' => 'sometimes|nullable|string|max:40',
+            'endsAt' => 'sometimes|nullable|string|max:40', 'active' => 'sometimes|bool',
+        ]);
+        $code = $this->normalizeCode($input['code']);
+        $discountBps = (int) round((float) $input['discountPercent'] * 100);
+        $commissionBps = (int) round((float) $input['commissionPercent'] * 100);
+        if ($discountBps < 0 || $discountBps > 10000 || $commissionBps < 0 || $commissionBps > 10000) {
+            throw new ApiException('VALIDATION_FAILED', 'Discount and commission must be between 0 and 100%.', 422);
+        }
+        $referrer = $this->database->fetchOne("SELECT id FROM users WHERE public_id = ? AND role = 'customer' AND status = 'active'", [(string) $input['referrerUserId']]);
+        if ($referrer === null) throw new ApiException('REFERRER_NOT_FOUND', 'Choose an active customer as the referral owner.', 422);
+        $days = (int) $input['attributionDays'];
+        if ($days < 1 || $days > 365) throw new ApiException('VALIDATION_FAILED', 'Attribution days must be between 1 and 365.', 422);
+        $starts = $this->date($input['startsAt'] ?? null, 'startsAt');
+        $ends = $this->date($input['endsAt'] ?? null, 'endsAt');
+        if ($starts !== null && $ends !== null && $ends <= $starts) throw new ApiException('VALIDATION_FAILED', 'The end date must be after the start date.', 422);
+        $now = Security::now();
+        try {
+            if ($publicId === null) {
+                $publicId = Security::uuid();
+                $this->database->execute(
+                    'INSERT INTO referral_links (public_id, code, name, referrer_user_id, discount_basis_points, discount_scope, commission_basis_points, attribution_days, starts_at, ends_at, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                    [$publicId, $code, trim((string) $input['name']), $referrer['id'], $discountBps, $input['discountScope'], $commissionBps, $days, $starts, $ends, !array_key_exists('active', $input) || !empty($input['active']) ? 1 : 0, $now, $now],
+                );
+            } else {
+                $updated = $this->database->execute(
+                    'UPDATE referral_links SET code = ?, name = ?, referrer_user_id = ?, discount_basis_points = ?, discount_scope = ?, commission_basis_points = ?, attribution_days = ?, starts_at = ?, ends_at = ?, is_active = ?, updated_at = ? WHERE public_id = ?',
+                    [$code, trim((string) $input['name']), $referrer['id'], $discountBps, $input['discountScope'], $commissionBps, $days, $starts, $ends, !array_key_exists('active', $input) || !empty($input['active']) ? 1 : 0, $now, $publicId],
+                );
+                if ($updated === 0) throw new ApiException('REFERRAL_NOT_FOUND', 'The referral link was not found.', 404);
+            }
+        } catch (PDOException $exception) {
+            throw new ApiException('REFERRAL_CODE_EXISTS', 'That referral code is already in use.', 409, ['code' => 'Choose a unique code.'], $exception);
+        }
+        foreach ($this->links() as $link) if ($link['id'] === $publicId) return $link;
+        throw new ApiException('REFERRAL_NOT_FOUND', 'The referral link was not found.', 404);
+    }
+
+    public function disable(string $publicId): void
+    {
+        if ($this->database->execute('UPDATE referral_links SET is_active = 0, updated_at = ? WHERE public_id = ?', [Security::now(), $publicId]) === 0) {
+            throw new ApiException('REFERRAL_NOT_FOUND', 'The referral link was not found.', 404);
+        }
+    }
+
+    /** @return list<array<string,mixed>> */
+    public function commissions(): array
+    {
+        $referrerName = $this->database->isMysql()
+            ? "COALESCE(NULLIF(ru.display_name, ''), NULLIF(TRIM(CONCAT(ru.first_name, ' ', ru.last_name)), ''), ru.email)"
+            : "COALESCE(NULLIF(ru.display_name, ''), TRIM(ru.first_name || ' ' || ru.last_name), ru.email)";
+        $customerName = $this->database->isMysql()
+            ? "COALESCE(NULLIF(cu.display_name, ''), NULLIF(TRIM(CONCAT(cu.first_name, ' ', cu.last_name)), ''), cu.email)"
+            : "COALESCE(NULLIF(cu.display_name, ''), TRIM(cu.first_name || ' ' || cu.last_name), cu.email)";
+        $rows = $this->database->fetchAll("SELECT rc.*, rl.code, o.public_id AS order_public_id, o.order_number, {$referrerName} AS referrer_name, {$customerName} AS customer_name FROM referral_commissions rc JOIN referral_links rl ON rl.id = rc.referral_link_id JOIN orders o ON o.id = rc.order_id JOIN users ru ON ru.id = rc.referrer_user_id JOIN users cu ON cu.id = rc.referred_user_id ORDER BY rc.created_at DESC, rc.id DESC");
+        return array_map(static fn (array $row): array => [
+            'id' => (string) $row['public_id'], 'code' => (string) $row['code'], 'orderId' => (string) $row['order_public_id'], 'orderNumber' => (string) $row['order_number'],
+            'referrerName' => (string) $row['referrer_name'], 'customerName' => (string) $row['customer_name'], 'basis' => ((int) $row['basis_cents']) / 100,
+            'ratePercent' => ((int) $row['rate_basis_points']) / 100, 'amount' => ((int) $row['amount_cents']) / 100, 'status' => (string) $row['status'],
+            'note' => $row['note'], 'createdAt' => $row['created_at'], 'approvedAt' => $row['approved_at'], 'paidAt' => $row['paid_at'],
+        ], $rows);
+    }
+
+    /** @return array<string,mixed> */
+    public function updateCommission(string $publicId, string $status, ?string $note): array
+    {
+        if (!in_array($status, ['paid', 'void'], true)) throw new ApiException('VALIDATION_FAILED', 'Choose paid or void.', 422);
+        $now = Security::now();
+        $condition = $status === 'paid' ? "status = 'approved'" : "status IN ('pending','approved')";
+        $updated = $this->database->execute(
+            "UPDATE referral_commissions SET status = ?, note = ?, paid_at = CASE WHEN ? = 'paid' THEN ? ELSE paid_at END, voided_at = CASE WHEN ? = 'void' THEN ? ELSE voided_at END, updated_at = ? WHERE public_id = ? AND {$condition}",
+            [$status, $note, $status, $now, $status, $now, $now, $publicId],
+        );
+        if ($updated === 0) throw new ApiException('COMMISSION_STATUS_INVALID', 'That commission cannot move to the selected status.', 409);
+        foreach ($this->commissions() as $commission) if ($commission['id'] === $publicId) return $commission;
+        throw new ApiException('COMMISSION_NOT_FOUND', 'The commission was not found.', 404);
+    }
+
+    /** @param array<string,mixed> $row @return array<string,mixed> */
+    private function mapLink(array $row): array
+    {
+        return [
+            'id' => (string) $row['public_id'], 'code' => (string) $row['code'], 'name' => (string) $row['name'],
+            'referrerUserId' => (string) $row['referrer_public_id'], 'referrerName' => (string) $row['referrer_name'], 'referrerEmail' => (string) $row['referrer_email'],
+            'discountPercent' => ((int) $row['discount_basis_points']) / 100, 'discountScope' => (string) $row['discount_scope'],
+            'commissionPercent' => ((int) $row['commission_basis_points']) / 100, 'attributionDays' => (int) $row['attribution_days'],
+            'active' => (bool) $row['is_active'], 'startsAt' => $row['starts_at'], 'endsAt' => $row['ends_at'],
+            'visits' => (int) ($row['visits'] ?? 0), 'downlines' => (int) ($row['downlines'] ?? 0), 'paidOrders' => (int) ($row['paid_orders'] ?? 0),
+            'paidRevenue' => ((int) ($row['paid_revenue_cents'] ?? 0)) / 100, 'pendingCommission' => ((int) ($row['pending_cents'] ?? 0)) / 100,
+            'approvedCommission' => ((int) ($row['approved_cents'] ?? 0)) / 100, 'paidCommission' => ((int) ($row['paid_cents'] ?? 0)) / 100,
+        ];
+    }
+
+    private function date(mixed $value, string $field): ?string
+    {
+        if ($value === null || $value === '') return null;
+        $timestamp = strtotime((string) $value);
+        if ($timestamp === false) throw new ApiException('VALIDATION_FAILED', 'Enter a valid date.', 422, [$field => 'Enter a valid date and time.']);
+        return gmdate('Y-m-d H:i:s', $timestamp);
+    }
+}
+
 final class OrderService
 {
     public function __construct(
         private readonly Database $database,
         private readonly StoreRepository $store,
         private readonly ?Config $config = null,
+        private readonly ?ReferralService $referrals = null,
     ) {
     }
 
@@ -329,6 +578,7 @@ final class OrderService
             'shippingAddress' => 'required|array',
             'paymentMethod' => 'required|string|in:manual_confirmation',
             'promoCode' => 'sometimes|nullable|string|max:64',
+            'referralCode' => 'sometimes|nullable|string|max:64',
             'bundleMetadata' => 'sometimes|nullable|array',
         ]);
         /** @var list<array<string,mixed>> $items */
@@ -369,7 +619,10 @@ final class OrderService
                     $promoDiscount = (int) $promo['discount_cents'];
                     $shipping = (int) $promo['shipping_cents'];
                 }
-                $discount = min($subtotal, $bundleDiscount + $promoDiscount);
+                $referral = $this->referrals?->forOrder((int) $context->userId(), $input['referralCode'] ?? null, $subtotal, $bundleDiscount)
+                    ?? ['link' => null, 'discount_cents' => 0];
+                $referralDiscount = (int) $referral['discount_cents'];
+                $discount = min($subtotal, $bundleDiscount + $promoDiscount + $referralDiscount);
                 $total = max(0, $subtotal - $discount + $shipping);
                 $user = $this->database->fetchOne('SELECT email, first_name, last_name, phone FROM users WHERE id = ?', [$context->userId()]);
                 if ($user === null) {
@@ -384,11 +637,12 @@ final class OrderService
                     'phone' => $address['phone'] ?? $user['phone'],
                 ];
                 $this->database->execute(
-                    'INSERT INTO orders (public_id, order_number, customer_id, status, payment_status, payment_method, currency, subtotal_cents, discount_cents, shipping_cents, total_cents, promo_id, promo_code, contact_json, shipping_address_json, bundle_metadata_json, idempotency_hash, request_hash, inventory_reserved_until, tracking_number, internal_note, inventory_restored_at, deleted_at, created_at, updated_at) ' .
-                    'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                    'INSERT INTO orders (public_id, order_number, customer_id, status, payment_status, payment_method, currency, subtotal_cents, discount_cents, shipping_cents, total_cents, promo_id, promo_code, referral_link_id, referrer_user_id, referral_code, referral_discount_cents, contact_json, shipping_address_json, bundle_metadata_json, idempotency_hash, request_hash, inventory_reserved_until, tracking_number, internal_note, inventory_restored_at, deleted_at, created_at, updated_at) ' .
+                    'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
                     [
                         $publicId, $orderNumber, $context->userId(), 'pending_payment', 'pending', 'manual_confirmation', 'MYR',
                         $subtotal, $discount, $shipping, $total, $promo['id'] ?? null, $promo['code'] ?? null,
+                        $referral['link']['id'] ?? null, $referral['link']['referrer_user_id'] ?? null, $referral['link']['code'] ?? null, $referralDiscount,
                         Security::jsonEncode($contact), Security::jsonEncode($address),
                         $normalizedBundle === null ? null : Security::jsonEncode($normalizedBundle), $idempotencyHash, $requestHash,
                         Security::afterSeconds($this->config?->int('order.reservation_seconds') ?: 86400),
@@ -396,6 +650,9 @@ final class OrderService
                     ],
                 );
                 $orderId = $this->database->lastInsertId();
+                if ($referral['link'] !== null) {
+                    $this->referrals?->createCommission($referral['link'], $orderId, (int) $context->userId(), max(0, $subtotal - $discount));
+                }
                 foreach ($lines as $line) {
                     $affected = $this->database->execute(
                         'UPDATE products SET stock_quantity = stock_quantity - ?, updated_at = ? WHERE id = ? AND stock_quantity >= ?',
@@ -507,6 +764,7 @@ final class OrderService
                 'UPDATE orders SET status = ?, payment_status = ?, tracking_number = ?, internal_note = ?, inventory_reserved_until = ?, inventory_restored_at = ?, updated_at = ? WHERE id = ?',
                 [$status, $paymentStatus, $trackingNumber, $internalNote, $reservationUntil, $restoredAt, $now, $order['id']],
             );
+            $this->referrals?->transitionOrder($orderId, $status);
         });
     }
 
@@ -526,6 +784,7 @@ final class OrderService
                 'UPDATE orders SET status = ?, inventory_reserved_until = NULL, inventory_restored_at = ?, deleted_at = ?, updated_at = ? WHERE id = ?',
                 [$status, $restoredAt, $now, $now, $order['id']],
             );
+            if ($status === 'cancelled') $this->referrals?->transitionOrder($orderId, 'cancelled');
         });
     }
 
@@ -560,6 +819,7 @@ final class OrderService
                     "UPDATE orders SET status = 'cancelled', inventory_reserved_until = NULL, inventory_restored_at = ?, updated_at = ? WHERE id = ?",
                     [$restoredAt, $now, $order['id']],
                 );
+                $this->referrals?->transitionOrder((int) $order['id'], 'cancelled');
                 return true;
             });
             if ($didRelease) {
@@ -589,6 +849,8 @@ final class OrderService
             'shipping' => ((int) $row['shipping_cents']) / 100,
             'total' => ((int) $row['total_cents']) / 100,
             'promoCode' => $row['promo_code'],
+            'referralCode' => $row['referral_code'] ?? null,
+            'referralDiscount' => ((int) ($row['referral_discount_cents'] ?? 0)) / 100,
             'trackingNumber' => $row['tracking_number'],
             'inventoryReservedUntil' => $row['inventory_reserved_until'] ?? null,
             'shippingAddress' => Security::jsonDecode((string) $row['shipping_address_json'], []),

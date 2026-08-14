@@ -38,6 +38,7 @@ import type { Env } from "./env";
 import { apiExceptionResponse, fail, methodNotAllowed } from "./http";
 import { handleAdminUpload, handleCustomerReceiptUpload, handleDeleteUpload, handleMedia, handlePaymentReceiptFile, handlePaymentReceiptReview } from "./media";
 import { handleStorefront } from "./storefront";
+import { handleAdminReferralCommissions, handleAdminReferrals, handleReferralResolve } from "./referrals";
 
 function oneOf(method: string, allowed: string[]): Response | null {
   return allowed.includes(method) ? null : methodNotAllowed(allowed);
@@ -143,6 +144,10 @@ async function dispatchApi(request: Request, env: Env): Promise<Response> {
       const rejected = oneOf(method, ["POST"]);
       return rejected ?? handlePromoValidation(request, env.DB);
     }
+    if (path === "/referrals/resolve") {
+      const rejected = oneOf(method, ["POST"]);
+      return rejected ?? handleReferralResolve(request, env.DB);
+    }
     if (path === "/newsletter") {
       const rejected = oneOf(method, ["POST"]);
       return rejected ?? handleNewsletter(request, env.DB);
@@ -156,6 +161,7 @@ async function dispatchApi(request: Request, env: Env): Promise<Response> {
       const permission = path.startsWith("/admin/orders") || path.startsWith("/admin/payment-receipts") ? "orders"
         : path.startsWith("/admin/customers") ? "customers"
           : path.startsWith("/admin/promos") ? "promos"
+            : path.startsWith("/admin/referral") ? "referrals"
             : path.startsWith("/admin/enquiries") ? "enquiries"
               : path.startsWith("/admin/products") || path.startsWith("/admin/slides") || path.startsWith("/admin/bundles") || path.startsWith("/admin/uploads") ? "content"
                 : path === "/admin/dashboard" ? "dashboard" : null;
@@ -230,6 +236,24 @@ async function dispatchApi(request: Request, env: Env): Promise<Response> {
     if (promoMatch) {
       const rejected = oneOf(method, ["PATCH", "DELETE"]);
       return rejected ?? handleAdminPromos(request, env.DB, decodeURIComponent(promoMatch[1]));
+    }
+    if (path === "/admin/referrals") {
+      const rejected = oneOf(method, ["GET", "POST"]);
+      return rejected ?? handleAdminReferrals(request, env.DB);
+    }
+    const referralMatch = path.match(/^\/admin\/referrals\/([^/]+)$/u);
+    if (referralMatch) {
+      const rejected = oneOf(method, ["PATCH", "DELETE"]);
+      return rejected ?? handleAdminReferrals(request, env.DB, decodeURIComponent(referralMatch[1]));
+    }
+    if (path === "/admin/referral-commissions") {
+      const rejected = oneOf(method, ["GET"]);
+      return rejected ?? handleAdminReferralCommissions(request, env.DB);
+    }
+    const commissionMatch = path.match(/^\/admin\/referral-commissions\/([^/]+)$/u);
+    if (commissionMatch) {
+      const rejected = oneOf(method, ["PATCH"]);
+      return rejected ?? handleAdminReferralCommissions(request, env.DB, decodeURIComponent(commissionMatch[1]));
     }
     if (path === "/admin/orders") {
       const rejected = oneOf(method, ["GET"]);

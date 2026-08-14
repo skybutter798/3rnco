@@ -82,7 +82,10 @@ export async function handlePaymentReceiptReview(request: Request, env: Env, id:
     env.DB.prepare("UPDATE payment_receipts SET status = ?, review_note = ?, reviewed_by = ?, reviewed_at = unixepoch(), updated_at = unixepoch() WHERE id = ? AND status = 'SUBMITTED'").bind(status, reviewNote, session.user.id, id),
     env.DB.prepare("INSERT INTO admin_audit_logs (id, actor_user_id, action, entity_type, entity_id, after_json) VALUES (?, ?, ?, 'PAYMENT_RECEIPT', ?, ?)").bind(randomId("audit"), session.user.id, status, id, JSON.stringify({ status, reviewNote })),
   ];
-  if (status === "VERIFIED") statements.push(env.DB.prepare("UPDATE orders SET status = 'PAYMENT_CONFIRMED', payment_status = 'PAID', updated_at = unixepoch() WHERE id = ? AND status = 'PENDING_PAYMENT' AND payment_status = 'PENDING'").bind(current.orderId));
+  if (status === "VERIFIED") {
+    statements.push(env.DB.prepare("UPDATE orders SET status = 'PAYMENT_CONFIRMED', payment_status = 'PAID', updated_at = unixepoch() WHERE id = ? AND status = 'PENDING_PAYMENT' AND payment_status = 'PENDING'").bind(current.orderId));
+    statements.push(env.DB.prepare("UPDATE referral_commissions SET status = 'APPROVED', approved_at = unixepoch(), updated_at = unixepoch() WHERE order_id = ? AND status = 'PENDING'").bind(current.orderId));
+  }
   await env.DB.batch(statements);
   const saved = await env.DB.prepare(`SELECT r.id, r.status, r.payment_method_id AS paymentMethodId, m.display_name AS paymentMethodName,
     r.customer_reference AS customerReference, r.customer_note AS customerNote, r.original_name AS originalName,

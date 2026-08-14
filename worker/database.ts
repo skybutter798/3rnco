@@ -2,10 +2,11 @@ import migrationSql from "../drizzle/0000_rare_kabuki.sql?raw";
 import authRateLimitMigration from "../drizzle/0001_regular_lionheart.sql?raw";
 import atomicCommerceMigration from "../drizzle/0002_atomic_commerce.sql?raw";
 import staffManualPaymentsMigration from "../drizzle/0003_staff_manual_payments.sql?raw";
+import referralMigration from "../drizzle/0007_dashing_bedlam.sql?raw";
 import atomicCommerceTriggers from "./atomic-commerce-triggers.sql?raw";
 import { seedProductionDatabase } from "./seed";
 
-const SCHEMA_VERSION = "4";
+const SCHEMA_VERSION = "5";
 const COMMERCE_TRIGGER_VERSION = "1";
 const RESERVATION_TTL_SECONDS = 24 * 60 * 60;
 const initializationByDatabase = new WeakMap<object, Promise<void>>();
@@ -28,11 +29,26 @@ function splitMigrationSql(...sources: string[]): string[] {
 }
 
 export function getMigrationStatements(): string[] {
-  return splitMigrationSql(migrationSql, authRateLimitMigration, atomicCommerceMigration, staffManualPaymentsMigration);
+  return splitMigrationSql(migrationSql, authRateLimitMigration, atomicCommerceMigration, staffManualPaymentsMigration, referralMigration);
 }
 
 export function getTriggerStatements(): string[] {
   return splitMigrationSql(atomicCommerceTriggers);
+}
+
+async function ensureReferralOrderColumns(db: D1Database): Promise<void> {
+  const result = await db.prepare("PRAGMA table_info(orders)").all<{ name: string }>();
+  const columns = new Set((result.results ?? []).map((column) => column.name));
+  const additions = [
+    ["referral_link_id", "ALTER TABLE orders ADD COLUMN referral_link_id text REFERENCES referral_links(id)"],
+    ["referrer_user_id", "ALTER TABLE orders ADD COLUMN referrer_user_id text REFERENCES users(id)"],
+    ["referral_code", "ALTER TABLE orders ADD COLUMN referral_code text"],
+    ["referral_discount_minor", "ALTER TABLE orders ADD COLUMN referral_discount_minor integer DEFAULT 0 NOT NULL"],
+  ] as const;
+  for (const [column, statement] of additions) {
+    if (!columns.has(column)) await db.prepare(statement).run();
+  }
+  await db.prepare("CREATE INDEX IF NOT EXISTS idx_orders_referral_placed ON orders (referral_link_id, placed_at)").run();
 }
 
 async function initializeDatabase(db: D1Database): Promise<void> {
@@ -45,6 +61,7 @@ async function initializeDatabase(db: D1Database): Promise<void> {
     for (let offset = 0; offset < statements.length; offset += 50) {
       await db.batch(statements.slice(offset, offset + 50));
     }
+    await ensureReferralOrderColumns(db);
     await db.prepare(`INSERT INTO app_state (key, value, updated_at)
       VALUES ('schema_version', ?, unixepoch())
       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = unixepoch()`)
@@ -87,6 +104,10 @@ export async function runDatabaseMaintenance(db: D1Database): Promise<void> {
       db.prepare(`UPDATE orders SET status = 'CANCELLED', updated_at = unixepoch()
         WHERE status = 'PENDING_PAYMENT' AND payment_status = 'PENDING'
           AND placed_at <= ?`).bind(now - RESERVATION_TTL_SECONDS),
+      db.prepare(`UPDATE referral_commissions SET status = 'VOID', voided_at = unixepoch(),
+        note = COALESCE(note, 'Order reservation expired'), updated_at = unixepoch()
+        WHERE status IN ('PENDING', 'APPROVED')
+          AND order_id IN (SELECT id FROM orders WHERE status = 'CANCELLED')`),
       db.prepare("DELETE FROM idempotency_keys WHERE expires_at <= ?").bind(now),
       db.prepare("DELETE FROM auth_rate_limits WHERE updated_at <= ? AND COALESCE(blocked_until, 0) <= ?")
         .bind(now - 24 * 60 * 60, now),

@@ -36,6 +36,7 @@ type Props = {
   onSession: (user: AuthUser | null) => void;
   onClose: () => void;
   settings: StoreSettings;
+  referralCode?: string;
 };
 
 const blankAddress: Address = {
@@ -87,6 +88,7 @@ export default function AccountDialog({
   onSession,
   onClose,
   settings,
+  referralCode,
 }: Props) {
   const [authMode, setAuthMode] = useState<"login" | "register">("login");
   const [tab, setTab] = useState<"profile" | "addresses" | "orders">("profile");
@@ -159,7 +161,7 @@ export default function AccountDialog({
           method: "POST",
           body:
             authMode === "register"
-              ? { fullName, email, phone, password }
+              ? { fullName, email, phone, password, referralCode: referralCode || undefined }
               : { email, password },
         },
       );

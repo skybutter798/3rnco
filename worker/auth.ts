@@ -88,7 +88,7 @@ function assertBootstrapAdminNetwork(
     return;
   const hostname = new URL(request.url).hostname;
   const local =
-    hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+    hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]";
   const remoteAddress =
     request.headers.get("cf-connecting-ip") ?? (local ? "127.0.0.1" : "");
   const allowed = (bootstrapAdminIps ?? "")

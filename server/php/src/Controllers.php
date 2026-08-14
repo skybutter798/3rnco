@@ -321,6 +321,7 @@ final class PublicController
         private readonly OrderService $orders,
         private readonly RateLimiter $rateLimiter,
         private readonly AuditLogger $audit,
+        private readonly ReferralService $referrals,
     ) {
     }
 
@@ -342,6 +343,12 @@ final class PublicController
         $this->audit->log($context, $request, 'order.created', 'order', (string) $order['id'], null, ['orderNumber' => $order['orderNumber'], 'total' => $order['total']]);
 
         return Response::success(['order' => $order], 201);
+    }
+
+    public function resolveReferral(Request $request, array $params, ?AuthContext $context): Response
+    {
+        Validator::requireValid($request->json(), ['code' => 'required|string|max:64']);
+        return Response::success($this->referrals->preview((string) $request->input('code'), $request, $context?->userId()));
     }
 
     public function enquiry(Request $request, array $params, ?AuthContext $context): Response
@@ -390,6 +397,7 @@ final class AdminController
         private readonly PaymentReceiptService $receipts,
         private readonly Auth $auth,
         private readonly AuditLogger $audit,
+        private readonly ReferralService $referrals,
     ) {
     }
 
@@ -755,6 +763,46 @@ final class AdminController
     public function orders(Request $request, array $params, ?AuthContext $context): Response
     {
         return Response::success(['orders' => $this->orders->allOrders()]);
+    }
+
+    public function referrals(Request $request, array $params, ?AuthContext $context): Response
+    {
+        return Response::success(['referrals' => $this->referrals->links()]);
+    }
+
+    public function createReferral(Request $request, array $params, ?AuthContext $context): Response
+    {
+        $saved = $this->referrals->save(null, $request->json());
+        $this->audit->log($context, $request, 'referral.created', 'referral_link', (string) $saved['id'], null, $saved);
+        return Response::success(['referral' => $saved], 201);
+    }
+
+    public function updateReferral(Request $request, array $params, ?AuthContext $context): Response
+    {
+        $saved = $this->referrals->save((string) $params['id'], $request->json());
+        $this->audit->log($context, $request, 'referral.updated', 'referral_link', (string) $saved['id'], null, $saved);
+        return Response::success(['referral' => $saved]);
+    }
+
+    public function deleteReferral(Request $request, array $params, ?AuthContext $context): Response
+    {
+        $this->referrals->disable((string) $params['id']);
+        $this->audit->log($context, $request, 'referral.disabled', 'referral_link', (string) $params['id'], null, ['active' => false]);
+        return Response::success(['id' => (string) $params['id'], 'deleted' => true]);
+    }
+
+    public function referralCommissions(Request $request, array $params, ?AuthContext $context): Response
+    {
+        return Response::success(['commissions' => $this->referrals->commissions()]);
+    }
+
+    public function updateReferralCommission(Request $request, array $params, ?AuthContext $context): Response
+    {
+        $input = $request->json();
+        Validator::requireValid($input, ['status' => 'required|string|in:paid,void', 'note' => 'sometimes|nullable|string|max:1000']);
+        $saved = $this->referrals->updateCommission((string) $params['id'], (string) $input['status'], isset($input['note']) ? (string) $input['note'] : null);
+        $this->audit->log($context, $request, 'referral.commission_updated', 'referral_commission', (string) $params['id'], null, ['status' => $input['status']]);
+        return Response::success(['commission' => $saved]);
     }
 
     public function order(Request $request, array $params, ?AuthContext $context): Response
@@ -1353,7 +1401,7 @@ final class AdminController
     /** @param list<mixed> $permissions @return list<string> */
     private function normalizeStaffPermissions(array $permissions): array
     {
-        $allowed = ['dashboard', 'orders', 'customers', 'content', 'promos', 'enquiries'];
+        $allowed = ['dashboard', 'orders', 'customers', 'content', 'promos', 'referrals', 'enquiries'];
         $normalized = array_values(array_unique(array_map('strval', $permissions)));
         if (array_diff($normalized, $allowed) !== []) {
             throw new ApiException('VALIDATION_FAILED', 'Choose only supported staff permissions.', 422, ['permissions' => 'One or more permissions are not supported.']);

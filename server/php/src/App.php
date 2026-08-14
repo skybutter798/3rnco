@@ -21,15 +21,16 @@ final class App
         $this->rateLimiter = new RateLimiter($config, $database);
         $audit = new AuditLogger($config, $database);
         $store = new StoreRepository($database);
-        $orders = new OrderService($database, $store, $config);
+        $referrals = new ReferralService($database);
+        $orders = new OrderService($database, $store, $config, $referrals);
         $uploads = new UploadService($config, $database);
         $receipts = new PaymentReceiptService($config, $database);
 
         $storeController = new StoreController($store, $database);
         $authController = new AuthController($this->auth, $this->rateLimiter, $audit);
         $accountController = new AccountController($database, $this->auth, $orders, $receipts, $audit);
-        $publicController = new PublicController($database, $orders, $this->rateLimiter, $audit);
-        $adminController = new AdminController($database, $store, $orders, $uploads, $receipts, $this->auth, $audit);
+        $publicController = new PublicController($database, $orders, $this->rateLimiter, $audit, $referrals);
+        $adminController = new AdminController($database, $store, $orders, $uploads, $receipts, $this->auth, $audit, $referrals);
 
         $this->routes($storeController, $authController, $accountController, $publicController, $adminController);
     }
@@ -128,6 +129,7 @@ final class App
         $this->router->add('GET', '/api/v1/orders', [$account, 'orders'], ['auth' => 'customer']);
         $this->router->add('POST', '/api/v1/orders', [$public, 'createOrder'], ['auth' => 'customer', 'csrf' => true, 'rate' => ['bucket' => 'order-create', 'limit' => 20, 'window' => 3600]]);
         $this->router->add('POST', '/api/v1/promos/validate', [$public, 'validatePromo'], ['csrf' => true, 'rate' => ['bucket' => 'promo-validate', 'limit' => 60, 'window' => 600]]);
+        $this->router->add('POST', '/api/v1/referrals/resolve', [$public, 'resolveReferral'], ['csrf' => true, 'rate' => ['bucket' => 'referral-resolve', 'limit' => 60, 'window' => 600]]);
         $this->router->add('POST', '/api/v1/enquiries', [$public, 'enquiry'], ['csrf' => true, 'rate' => ['bucket' => 'enquiry-create', 'limit' => 8, 'window' => 3600]]);
         $this->router->add('POST', '/api/v1/newsletter', [$public, 'newsletter'], ['csrf' => true, 'rate' => ['bucket' => 'newsletter', 'limit' => 8, 'window' => 3600]]);
 
@@ -147,6 +149,9 @@ final class App
         $this->resource('/api/v1/admin/slides', $admin, 'slides', 'product', 'createSlide', 'updateSlide', 'deleteSlide', 'slide');
         $this->resource('/api/v1/admin/bundles', $admin, 'bundles', 'bundle', 'createBundle', 'updateBundle', 'deleteBundle');
         $this->resource('/api/v1/admin/promos', $admin, 'promos', 'promo', 'createPromo', 'updatePromo', 'deletePromo');
+        $this->resource('/api/v1/admin/referrals', $admin, 'referrals', 'referrals', 'createReferral', 'updateReferral', 'deleteReferral');
+        $this->router->add('GET', '/api/v1/admin/referral-commissions', [$admin, 'referralCommissions'], ['auth' => 'backoffice', 'permission' => 'referrals']);
+        $this->router->add('PATCH', '/api/v1/admin/referral-commissions/{id}', [$admin, 'updateReferralCommission'], ['auth' => 'backoffice', 'permission' => 'referrals', 'csrf' => true]);
         $this->resource('/api/v1/admin/orders', $admin, 'orders', 'order', null, 'updateOrder', 'deleteOrder');
         $this->resource('/api/v1/admin/customers', $admin, 'customers', 'customer', 'createCustomer', 'updateCustomer', 'deleteCustomer');
         $this->resource('/api/v1/admin/enquiries', $admin, 'enquiries', 'enquiry', null, 'updateEnquiry', 'deleteEnquiry');
@@ -161,7 +166,7 @@ final class App
     {
         $permission = match (true) {
             str_contains($base, '/orders') => 'orders', str_contains($base, '/customers') => 'customers',
-            str_contains($base, '/enquiries') => 'enquiries', str_contains($base, '/promos') => 'promos',
+            str_contains($base, '/enquiries') => 'enquiries', str_contains($base, '/promos') => 'promos', str_contains($base, '/referrals') => 'referrals',
             default => 'content',
         };
         $options = ['auth' => 'backoffice', 'permission' => $permission];

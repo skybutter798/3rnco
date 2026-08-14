@@ -10,6 +10,7 @@ import {
   requiredString,
 } from "./http";
 import { consumeRateLimit } from "./rate-limit";
+import { resolveOrderReferral } from "./referrals";
 
 type RequestedItem = { productId: string; quantity: number };
 type PricedItem = RequestedItem & {
@@ -659,6 +660,13 @@ export async function handleCreateOrder(
     subtotalMinor,
     session.user.id,
   );
+  const referral = await resolveOrderReferral(
+    db,
+    session.user.id,
+    body.referralCode,
+    subtotalMinor,
+    bundlePricing.discountMinor,
+  );
   const settings = await shippingSettings(db);
   const shippingMinor =
     promotion.freeShipping || subtotalMinor >= settings.thresholdMinor
@@ -666,7 +674,7 @@ export async function handleCreateOrder(
       : settings.shippingFeeMinor;
   const discountMinor = Math.min(
     subtotalMinor,
-    promotion.discountMinor + bundlePricing.discountMinor,
+    promotion.discountMinor + bundlePricing.discountMinor + referral.discountMinor,
   );
   const totalMinor = subtotalMinor - discountMinor + shippingMinor;
   const orderId = randomId("order");
@@ -696,8 +704,9 @@ export async function handleCreateOrder(
         `INSERT INTO orders
       (id, order_number, user_id, customer_name, customer_email, customer_phone,
        status, payment_status, fulfilment_status, payment_method, currency,
-       subtotal_minor, discount_minor, shipping_minor, tax_minor, total_minor, promotion_id, placed_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, 'PENDING_PAYMENT', 'PENDING', 'UNFULFILLED', ?, 'MYR', ?, ?, ?, 0, ?, ?, ?, ?)`,
+       subtotal_minor, discount_minor, shipping_minor, tax_minor, total_minor, promotion_id,
+       referral_link_id, referrer_user_id, referral_code, referral_discount_minor, placed_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, 'PENDING_PAYMENT', 'PENDING', 'UNFULFILLED', ?, 'MYR', ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .bind(
         orderId,
@@ -712,6 +721,10 @@ export async function handleCreateOrder(
         shippingMinor,
         totalMinor,
         promotion.promotionId,
+        referral.link?.id ?? null,
+        referral.link?.referrerUserId ?? null,
+        referral.link?.code ?? null,
+        referral.discountMinor,
         placedAt,
         placedAt,
       ),
@@ -741,6 +754,7 @@ export async function handleCreateOrder(
       )
       .bind(randomId("order_status"), orderId, session.user.id),
   ];
+  if (referral.assignment) statements.push(referral.assignment);
   items.forEach((item) => {
     const allocations = bundlePricing.byProduct.get(item.productId) ?? [];
     const addOrderItem = (quantity: number, bundle?: BundleItemMetadata) =>
@@ -803,6 +817,19 @@ export async function handleCreateOrder(
           orderId,
           promotion.discountMinor,
         ),
+    );
+  }
+  if (referral.link && referral.link.commissionBasisPoints > 0) {
+    const commissionBasisMinor = Math.max(0, subtotalMinor - discountMinor);
+    const commissionMinor = Math.round(commissionBasisMinor * referral.link.commissionBasisPoints / 10_000);
+    statements.push(
+      db.prepare(`INSERT INTO referral_commissions
+        (id, referral_link_id, order_id, referrer_user_id, referred_user_id,
+         basis_minor, rate_basis_points, amount_minor, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'PENDING')`).bind(
+        randomId("commission"), referral.link.id, orderId, referral.link.referrerUserId,
+        session.user.id, commissionBasisMinor, referral.link.commissionBasisPoints, commissionMinor,
+      ),
     );
   }
   statements.push(

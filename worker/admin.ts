@@ -14,7 +14,7 @@ import { loadBundles, loadProducts, storefrontPayload } from "./storefront";
 
 type AdminSession = Awaited<ReturnType<typeof requireAdmin>>;
 
-const staffPermissions = ["dashboard", "orders", "customers", "content", "promos", "enquiries"] as const;
+const staffPermissions = ["dashboard", "orders", "customers", "content", "promos", "referrals", "enquiries"] as const;
 
 function normalizedStaffPermissions(value: unknown): string[] {
   if (!Array.isArray(value)) throw new ApiError(422, "VALIDATION_ERROR", "Choose staff permissions.", { permissions: "Choose at least one permission." });
@@ -315,7 +315,7 @@ export async function handleAdminSettings(
       sort_order = excluded.sort_order, updated_at = unixepoch()`)
       .bind(id, type, name, enabled, instructions, qrImage, bankName, accountName, accountNumber, Number(method.sortOrder ?? index));
   });
-  await db.batch([
+  const settingsStatements = [
     db
       .prepare(
         `UPDATE store_settings SET brand_name = ?, support_email = ?, whatsapp_e164 = ?,
@@ -352,7 +352,8 @@ export async function handleAdminSettings(
       .bind(facebookUrl),
     auditStatement(db, session, "UPDATE", "STORE_SETTINGS", "default", body),
     ...paymentMethodStatements,
-  ]);
+  ];
+  await db.batch(settingsStatements);
   return ok({ settings: (await storefrontPayload(db)).settings });
 }
 
@@ -1497,7 +1498,7 @@ export async function handleAdminOrders(
       "The order changed in another session. Refresh and try again.",
     );
   }
-  await db.batch([
+  const statusStatements = [
     db
       .prepare(
         `INSERT INTO order_status_history
@@ -1515,7 +1516,15 @@ export async function handleAdminOrders(
       status,
       paymentStatus,
     }),
-  ]);
+  ];
+  if (status === "PAYMENT_CONFIRMED") {
+    statusStatements.push(db.prepare(`UPDATE referral_commissions SET status = 'APPROVED', approved_at = unixepoch(), updated_at = unixepoch()
+      WHERE order_id = ? AND status = 'PENDING'`).bind(id));
+  } else if (status === "CANCELLED") {
+    statusStatements.push(db.prepare(`UPDATE referral_commissions SET status = 'VOID', voided_at = unixepoch(), note = 'Order cancelled', updated_at = unixepoch()
+      WHERE order_id = ? AND status IN ('PENDING','APPROVED')`).bind(id));
+  }
+  await db.batch(statusStatements);
   const saved = (await loadAdminOrders(db)).find((order) => order.id === id);
   return ok({ order: saved });
 }
