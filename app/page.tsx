@@ -1610,17 +1610,17 @@ export default function Home() {
 
           <section className="editorial-break reveal">
             <img
-              src="/images/campaign/patient-making-v6.webp"
-              alt="Hands carefully measuring 3R&Co body oil beside body cream and a well-used formulation notebook"
+              src="/images/campaign/care-passed-gently-v8.webp"
+              alt="An older woman gently passing a hand-stitched linen cloth to a younger woman at home"
             />
             <div className="editorial-break__overlay">
-              <p className="eyebrow">From our hands to yours</p>
+              <p className="eyebrow">Care, passed gently on</p>
               <h2>
-                Made slowly.
+                Small gestures.
                 <br />
-                <em>With you</em>
+                Held close.
                 <br />
-                <em>in mind.</em>
+                <em>Carried forward.</em>
               </h2>
             </div>
           </section>
