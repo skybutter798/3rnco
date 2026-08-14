@@ -879,6 +879,21 @@ export default function AccountDialog({
                         <h3>My referrals</h3>
                         <p>Share your active link and follow each commission from order to payout.</p>
                       </div>
+                      {!!referrals.links.length && (
+                        <button
+                          className="referral-jump-button"
+                          type="button"
+                          onClick={() => {
+                            const report = document.getElementById("my-referral-commission-report");
+                            report?.scrollIntoView({ behavior: "smooth", block: "start" });
+                            report?.focus({ preventScroll: true });
+                          }}
+                        >
+                          <WalletCards size={16} />
+                          View commissions
+                          <span>{referrals.commissions.length}</span>
+                        </button>
+                      )}
                     </div>
                     {!referrals.links.length ? (
                       <EmptyAccount
@@ -915,7 +930,11 @@ export default function AccountDialog({
                             );
                           })}
                         </div>
-                        <section className="referral-commission-report">
+                        <section
+                          className="referral-commission-report"
+                          id="my-referral-commission-report"
+                          tabIndex={-1}
+                        >
                           <header><WalletCards size={20} /><div><h4>Commission report</h4><p>Customer identities stay private; each row is tied to its order number.</p></div></header>
                           {!referrals.commissions.length ? <p className="referral-report-empty">No commission activity yet.</p> : (
                             <div className="referral-commission-table">

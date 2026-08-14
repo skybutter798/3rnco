@@ -135,6 +135,8 @@ test("includes persistent production commerce and clean seed contracts", async (
   assert.match(account, /minLength=\{8\}/);
   assert.match(account, /Capitals,\s+numbers and symbols are\s+optional/);
   assert.match(account, /\/profile\/addresses/);
+  assert.match(account, /View commissions/);
+  assert.match(account, /my-referral-commission-report/);
   assert.match(admin, /Gift & ritual set builder/);
   assert.match(admin, /Fixed amount \(RM\)/);
   assert.match(admin, /Percentage \(%\)/);
@@ -178,6 +180,18 @@ test("includes persistent production commerce and clean seed contracts", async (
   assert.match(productionCss, /--orders-grid:/);
   assert.match(productionCss, /\.admin-orders-table\.orders-table/);
   assert.match(productionCss, /grid-template-columns:\s*var\(--orders-grid\)/);
+  assert.match(
+    productionCss,
+    /height:\s*min\(900px,\s*calc\(100dvh\s*-\s*48px\)\)/,
+  );
+  assert.match(
+    productionCss,
+    /\.referral-report \.referral-commission-table > div/,
+  );
+  assert.doesNotMatch(
+    productionCss,
+    /(?:^|\n)\.referral-commission-table > div/,
+  );
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
   assert.match(packageJson, /cross-env WRANGLER_LOG_PATH/);
 });
