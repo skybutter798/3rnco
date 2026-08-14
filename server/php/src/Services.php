@@ -416,6 +416,42 @@ final class ReferralService
         return array_map(fn (array $row): array => $this->mapLink($row), $rows);
     }
 
+    /** @return array<string,mixed> */
+    public function customerDashboard(int $userId): array
+    {
+        $user = $this->database->fetchOne('SELECT public_id FROM users WHERE id = ?', [$userId]);
+        if ($user === null) throw new ApiException('ACCOUNT_NOT_FOUND', 'The account was not found.', 404);
+        $links = array_values(array_filter(
+            $this->links(),
+            static fn (array $link): bool => $link['referrerUserId'] === (string) $user['public_id'],
+        ));
+        $rows = $this->database->fetchAll(
+            'SELECT rc.*, rl.code, o.public_id AS order_public_id, o.order_number FROM referral_commissions rc ' .
+            'JOIN referral_links rl ON rl.id = rc.referral_link_id JOIN orders o ON o.id = rc.order_id ' .
+            'WHERE rc.referrer_user_id = ? ORDER BY rc.created_at DESC, rc.id DESC',
+            [$userId],
+        );
+        $commissions = array_map(static fn (array $row): array => [
+            'id' => (string) $row['public_id'], 'code' => (string) $row['code'],
+            'orderId' => (string) $row['order_public_id'], 'orderNumber' => (string) $row['order_number'],
+            'basis' => ((int) $row['basis_cents']) / 100, 'ratePercent' => ((int) $row['rate_basis_points']) / 100,
+            'amount' => ((int) $row['amount_cents']) / 100, 'status' => (string) $row['status'],
+            'note' => $row['note'], 'createdAt' => $row['created_at'],
+            'approvedAt' => $row['approved_at'], 'paidAt' => $row['paid_at'],
+        ], $rows);
+        $sum = static fn (string $status): float => array_reduce(
+            $commissions,
+            static fn (float $total, array $item): float => $total + ($item['status'] === $status ? (float) $item['amount'] : 0.0),
+            0.0,
+        );
+        $pending = $sum('pending');
+        $approved = $sum('approved');
+        $paid = $sum('paid');
+        return ['links' => $links, 'commissions' => $commissions, 'totals' => [
+            'pending' => $pending, 'approved' => $approved, 'paid' => $paid, 'earned' => $approved + $paid,
+        ]];
+    }
+
     /** @param array<string,mixed> $input @return array<string,mixed> */
     public function save(?string $publicId, array $input): array
     {

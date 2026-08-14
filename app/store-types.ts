@@ -236,6 +236,32 @@ export type ReferralCommission = {
   paidAt?: string;
 };
 
+export type CustomerReferralCommission = {
+  id: string;
+  code: string;
+  orderId: string;
+  orderNumber: string;
+  basis: number;
+  ratePercent: number;
+  amount: number;
+  status: "pending" | "approved" | "paid" | "void" | string;
+  note?: string | null;
+  createdAt: string;
+  approvedAt?: string;
+  paidAt?: string;
+};
+
+export type CustomerReferralDashboard = {
+  links: ReferralLink[];
+  commissions: CustomerReferralCommission[];
+  totals: {
+    pending: number;
+    approved: number;
+    paid: number;
+    earned: number;
+  };
+};
+
 export type ReferralOffer = {
   code: string;
   name: string;

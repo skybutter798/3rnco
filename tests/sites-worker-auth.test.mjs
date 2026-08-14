@@ -7,6 +7,8 @@ const authSource = await readFile(new URL("../worker/auth.ts", import.meta.url),
 const httpSource = await readFile(new URL("../worker/http.ts", import.meta.url), "utf8");
 const apiSource = await readFile(new URL("../worker/api.ts", import.meta.url), "utf8");
 const rateLimitSource = await readFile(new URL("../worker/rate-limit.ts", import.meta.url), "utf8");
+const adminSource = await readFile(new URL("../worker/admin.ts", import.meta.url), "utf8");
+const referralSource = await readFile(new URL("../worker/referrals.ts", import.meta.url), "utf8");
 
 test("password and session implementation uses server-side cryptography", () => {
   assert.match(cryptoSource, /const PBKDF2_ITERATIONS = 600_000/u);
@@ -32,4 +34,15 @@ test("API helpers implement the fixed success and error envelopes", () => {
   assert.match(httpSource, /"x-content-type-options": "nosniff"/u);
   assert.match(apiSource, /return await dispatchApi\(request, env\)/u);
   assert.match(apiSource, /data: \{ status: "ok" \}/u);
+});
+
+test("customer management and self-service referral reporting are routed and protected", () => {
+  assert.match(apiSource, /path === "\/account\/referrals"/u);
+  assert.match(apiSource, /const customerMatch = path\.match/u);
+  assert.match(referralSource, /handleAccountReferrals/u);
+  assert.match(referralSource, /requireCustomer\(request, db\)/u);
+  assert.match(referralSource, /WHERE rc\.referrer_user_id = \?/u);
+  assert.match(adminSource, /handleAdminCustomers\(request: Request, db: D1Database, id\?: string\)/u);
+  assert.match(adminSource, /UPDATE user_sessions SET revoked_at/u);
+  assert.match(adminSource, /DELETE FROM customer_addresses WHERE user_id = \?/u);
 });

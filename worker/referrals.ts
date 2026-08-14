@@ -1,4 +1,4 @@
-import { getSession, requireAdmin } from "./auth";
+import { getSession, requireAdmin, requireCustomer } from "./auth";
 import { randomId, sha256 } from "./crypto";
 import { allRows } from "./database";
 import {
@@ -179,6 +179,31 @@ async function adminLinks(db: D1Database) {
     paidRevenue: Number(row.paidRevenueMinor) / 100, pendingCommission: Number(row.pendingMinor) / 100,
     approvedCommission: Number(row.approvedMinor) / 100, paidCommission: Number(row.paidMinor) / 100,
   }));
+}
+
+export async function handleAccountReferrals(request: Request, db: D1Database): Promise<Response> {
+  const session = await requireCustomer(request, db);
+  const links = (await adminLinks(db)).filter((link) => link.referrerUserId === session.user.id);
+  const rows = await allRows<{ id: string; code: string; orderId: string; orderNumber: string; basisMinor: number; rateBasisPoints: number; amountMinor: number; status: string; note: string | null; createdAt: number; approvedAt: number | null; paidAt: number | null }>(db.prepare(`SELECT rc.id, rl.code, rc.order_id AS orderId, o.order_number AS orderNumber,
+    rc.basis_minor AS basisMinor, rc.rate_basis_points AS rateBasisPoints, rc.amount_minor AS amountMinor,
+    rc.status, rc.note, rc.created_at AS createdAt, rc.approved_at AS approvedAt, rc.paid_at AS paidAt
+    FROM referral_commissions rc JOIN referral_links rl ON rl.id = rc.referral_link_id
+    JOIN orders o ON o.id = rc.order_id WHERE rc.referrer_user_id = ? ORDER BY rc.created_at DESC`)
+    .bind(session.user.id));
+  const commissions = rows.map((row) => ({
+    id: row.id, code: row.code, orderId: row.orderId, orderNumber: row.orderNumber,
+    basis: Number(row.basisMinor) / 100, ratePercent: Number(row.rateBasisPoints) / 100,
+    amount: Number(row.amountMinor) / 100, status: row.status.toLowerCase(), note: row.note,
+    createdAt: new Date(row.createdAt * 1000).toISOString(),
+    approvedAt: row.approvedAt ? new Date(row.approvedAt * 1000).toISOString() : undefined,
+    paidAt: row.paidAt ? new Date(row.paidAt * 1000).toISOString() : undefined,
+  }));
+  const total = (status: string) => commissions.filter((item) => item.status === status)
+    .reduce((sum, item) => sum + item.amount, 0);
+  const pending = total("pending");
+  const approved = total("approved");
+  const paid = total("paid");
+  return ok({ links, commissions, totals: { pending, approved, paid, earned: approved + paid } });
 }
 
 export async function handleAdminReferrals(request: Request, db: D1Database, id?: string): Promise<Response> {

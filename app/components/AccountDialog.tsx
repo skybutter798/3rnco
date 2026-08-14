@@ -3,10 +3,12 @@
 import {
   ArrowRight,
   Check,
+  Copy,
   CreditCard,
   Eye,
   EyeOff,
   Leaf,
+  Link2,
   LogOut,
   MapPin,
   Package,
@@ -17,6 +19,7 @@ import {
   Trash2,
   Upload,
   UserRound,
+  WalletCards,
   X,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -26,6 +29,7 @@ import type {
   AuthSession,
   AuthUser,
   CustomerProfile,
+  CustomerReferralDashboard,
   StoreOrder,
   StoreSettings,
   PaymentMethod,
@@ -91,7 +95,7 @@ export default function AccountDialog({
   referralCode,
 }: Props) {
   const [authMode, setAuthMode] = useState<"login" | "register">("login");
-  const [tab, setTab] = useState<"profile" | "addresses" | "orders">("profile");
+  const [tab, setTab] = useState<"profile" | "addresses" | "orders" | "referrals">("profile");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -100,6 +104,7 @@ export default function AccountDialog({
   const [showPassword, setShowPassword] = useState(false);
   const [profile, setProfile] = useState<CustomerProfile | null>(null);
   const [orders, setOrders] = useState<StoreOrder[]>([]);
+  const [referrals, setReferrals] = useState<CustomerReferralDashboard | null>(null);
   const [addressDraft, setAddressDraft] = useState<Address | null>(null);
   const [busy, setBusy] = useState(false);
   const [loadingAccount, setLoadingAccount] = useState(true);
@@ -119,15 +124,17 @@ export default function AccountDialog({
             "/profile",
           ),
           apiRequest<StoreOrder[] | { orders: StoreOrder[] }>("/orders"),
+          apiRequest<CustomerReferralDashboard>("/account/referrals"),
         ]);
       })
-      .then(([profileResult, orderResult]) => {
+      .then(([profileResult, orderResult, referralResult]) => {
         if (cancelled) return;
         const nextProfile = unwrapProfile(profileResult);
         setProfile(nextProfile);
         setFullName(nextProfile.fullName || "");
         setPhone(nextProfile.phone || "");
         setOrders(unwrapOrders(orderResult));
+        setReferrals(referralResult);
       })
       .catch((reason) => !cancelled && setError(errorMessage(reason)))
       .finally(() => !cancelled && setLoadingAccount(false));
@@ -528,6 +535,13 @@ export default function AccountDialog({
                 <Package size={17} />
                 Orders
               </button>
+              <button
+                className={tab === "referrals" ? "is-active" : ""}
+                onClick={() => setTab("referrals")}
+              >
+                <Link2 size={17} />
+                My Referrals
+              </button>
             </nav>
             {loadingAccount ? (
               <div className="account-loading">
@@ -854,6 +868,71 @@ export default function AccountDialog({
                           />
                         ))}
                       </div>
+                    )}
+                  </div>
+                )}
+                {tab === "referrals" && referrals && (
+                  <div className="account-referrals">
+                    <div className="account-panel__heading">
+                      <div>
+                        <p className="eyebrow">Referral partner</p>
+                        <h3>My referrals</h3>
+                        <p>Share your active link and follow each commission from order to payout.</p>
+                      </div>
+                    </div>
+                    {!referrals.links.length ? (
+                      <EmptyAccount
+                        icon={<Link2 />}
+                        title="No referral link assigned yet."
+                        copy="Once the 3R&Co team activates a referral link for your account, it will appear here with your commission report."
+                      />
+                    ) : (
+                      <>
+                        <div className="referral-wallet">
+                          <article><span>Pending</span><strong>RM{referrals.totals.pending.toFixed(2)}</strong><small>Waiting for payment confirmation</small></article>
+                          <article><span>Approved</span><strong>RM{referrals.totals.approved.toFixed(2)}</strong><small>Ready for the next payout</small></article>
+                          <article><span>Paid</span><strong>RM{referrals.totals.paid.toFixed(2)}</strong><small>Total commission paid</small></article>
+                        </div>
+                        <div className="referral-link-list">
+                          {referrals.links.map((link) => {
+                            const shareUrl = typeof window === "undefined" ? `/?ref=${link.code}` : `${window.location.origin}/?ref=${link.code}`;
+                            return (
+                              <article key={link.id}>
+                                <header>
+                                  <div><span className={`status-badge ${link.active ? "status-badge--active" : "status-badge--disabled"}`}>{link.active ? "Active" : "Paused"}</span><h4>{link.name}</h4></div>
+                                  <button type="button" onClick={() => { void navigator.clipboard?.writeText(shareUrl); setNotice("Referral link copied."); }}><Copy size={15} /> Copy link</button>
+                                </header>
+                                <div className="referral-share-url">{shareUrl}</div>
+                                <dl>
+                                  <div><dt>Shopper saving</dt><dd>{link.discountPercent}% · {link.discountScope === "first_purchase" ? "first purchase" : link.discountScope === "every_purchase" ? "every purchase" : "no discount"}</dd></div>
+                                  <div><dt>Your commission</dt><dd>{link.commissionPercent}% per paid order</dd></div>
+                                  <div><dt>Visits</dt><dd>{link.visits || 0}</dd></div>
+                                  <div><dt>Referred customers</dt><dd>{link.downlines || 0}</dd></div>
+                                  <div><dt>Paid orders</dt><dd>{link.paidOrders || 0}</dd></div>
+                                  <div><dt>Referred revenue</dt><dd>RM{Number(link.paidRevenue || 0).toFixed(2)}</dd></div>
+                                </dl>
+                              </article>
+                            );
+                          })}
+                        </div>
+                        <section className="referral-commission-report">
+                          <header><WalletCards size={20} /><div><h4>Commission report</h4><p>Customer identities stay private; each row is tied to its order number.</p></div></header>
+                          {!referrals.commissions.length ? <p className="referral-report-empty">No commission activity yet.</p> : (
+                            <div className="referral-commission-table">
+                              <div className="referral-commission-row referral-commission-row--head"><span>Order</span><span>Date</span><span>Rate</span><span>Amount</span><span>Status</span></div>
+                              {referrals.commissions.map((commission) => (
+                                <div className="referral-commission-row" key={commission.id}>
+                                  <span><b>{commission.orderNumber}</b><small>?ref={commission.code}</small></span>
+                                  <span>{new Date(commission.createdAt).toLocaleDateString("en-MY", { day: "numeric", month: "short", year: "numeric" })}</span>
+                                  <span>{commission.ratePercent}%<small>RM{commission.basis.toFixed(2)} basis</small></span>
+                                  <strong>RM{commission.amount.toFixed(2)}</strong>
+                                  <em className={`status-badge status-badge--${commission.status}`}>{commission.status}</em>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </section>
+                      </>
                     )}
                   </div>
                 )}

@@ -71,6 +71,24 @@ Open **Admin > Referrals** to:
 
 Staff can be granted the dedicated `referrals` permission without receiving full owner access.
 
+## Customer workflow
+
+The referral owner signs in to the storefront and opens **My Account > My Referrals**. The dashboard shows:
+
+- every referral link assigned to that account and a copyable share URL;
+- the shopper discount rule and the owner's commission rate;
+- visits, directly attributed customers, paid orders, and paid revenue;
+- pending, approved, paid, and lifetime-earned commission totals;
+- an order-level commission report with basis, rate, amount, and status.
+
+The customer view never exposes the referred shopper's name, email, phone, or address. Customers can report on their own links and commissions, but only an administrator can change commercial terms or payout state.
+
+## Customer administration
+
+Open **Admin > Customers** to create an account or select **Manage** for an existing customer. Administrators can maintain the customer's name, email, phone, birth date, marketing consent, active/disabled status, temporary password, and all delivery addresses. The detailed view also contains sign-in state, recent orders, spend, owned referral links, and the link that referred the customer.
+
+Changing an email clears its previous verification state. Setting a temporary password, changing an email, or disabling an account revokes its active sessions. Customer removal is implemented as a reversible account disable rather than deleting commerce history.
+
 ## Data model
 
 - `referral_links`: configurable link and rate definitions;

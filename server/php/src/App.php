@@ -28,7 +28,7 @@ final class App
 
         $storeController = new StoreController($store, $database);
         $authController = new AuthController($this->auth, $this->rateLimiter, $audit);
-        $accountController = new AccountController($database, $this->auth, $orders, $receipts, $audit);
+        $accountController = new AccountController($database, $this->auth, $orders, $receipts, $audit, $referrals);
         $publicController = new PublicController($database, $orders, $this->rateLimiter, $audit, $referrals);
         $adminController = new AdminController($database, $store, $orders, $uploads, $receipts, $this->auth, $audit, $referrals);
 
@@ -127,6 +127,7 @@ final class App
         $this->router->add('PATCH', '/api/v1/addresses/{id}', [$account, 'updateAddress'], ['auth' => 'user', 'csrf' => true]);
         $this->router->add('DELETE', '/api/v1/addresses/{id}', [$account, 'deleteAddress'], ['auth' => 'user', 'csrf' => true]);
         $this->router->add('GET', '/api/v1/orders', [$account, 'orders'], ['auth' => 'customer']);
+        $this->router->add('GET', '/api/v1/account/referrals', [$account, 'referrals'], ['auth' => 'customer']);
         $this->router->add('POST', '/api/v1/orders', [$public, 'createOrder'], ['auth' => 'customer', 'csrf' => true, 'rate' => ['bucket' => 'order-create', 'limit' => 20, 'window' => 3600]]);
         $this->router->add('POST', '/api/v1/promos/validate', [$public, 'validatePromo'], ['csrf' => true, 'rate' => ['bucket' => 'promo-validate', 'limit' => 60, 'window' => 600]]);
         $this->router->add('POST', '/api/v1/referrals/resolve', [$public, 'resolveReferral'], ['csrf' => true, 'rate' => ['bucket' => 'referral-resolve', 'limit' => 60, 'window' => 600]]);

@@ -105,6 +105,7 @@ final class AccountController
         private readonly OrderService $orders,
         private readonly PaymentReceiptService $receipts,
         private readonly AuditLogger $audit,
+        private readonly ReferralService $referrals,
     ) {
     }
 
@@ -221,6 +222,12 @@ final class AccountController
     {
         $user = $this->requiredUser($context);
         return Response::success(['orders' => $this->orders->customerOrders((int) $user['id'])]);
+    }
+
+    public function referrals(Request $request, array $params, ?AuthContext $context): Response
+    {
+        $user = $this->requiredUser($context);
+        return Response::success($this->referrals->customerDashboard((int) $user['id']));
     }
 
     public function uploadPaymentReceipt(Request $request, array $params, ?AuthContext $context): Response
@@ -855,6 +862,7 @@ final class AdminController
     public function createCustomer(Request $request, array $params, ?AuthContext $context): Response
     {
         $input = $request->json();
+        if (!isset($input['password']) && isset($input['temporaryPassword'])) $input['password'] = $input['temporaryPassword'];
         if (isset($input['fullName']) && (!isset($input['firstName']) || !isset($input['lastName']))) {
             $parts = preg_split('/\s+/', trim((string) $input['fullName']), 2) ?: [];
             $input['firstName'] = $parts[0] ?? '';
@@ -862,16 +870,26 @@ final class AdminController
         }
         Validator::requireValid($input, [
             'email' => 'required|string|email|max:191', 'password' => 'required|string|min:8|max:200', 'firstName' => 'required|string|max:100',
-            'lastName' => 'required|string|max:100', 'phone' => 'sometimes|nullable|string|max:40',
+            'lastName' => 'sometimes|string|max:100', 'phone' => 'sometimes|nullable|string|max:40', 'birthDate' => 'sometimes|nullable|string|max:10',
+            'marketingConsent' => 'sometimes|bool', 'status' => 'sometimes|string|in:active,disabled', 'addresses' => 'sometimes|array',
         ]);
         Validator::password((string) $input['password'], 8, false);
+        $birthDate = $input['birthDate'] ?? $input['dateOfBirth'] ?? null;
+        if ($birthDate !== null && $birthDate !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) $birthDate)) {
+            throw new ApiException('VALIDATION_FAILED', 'Please correct the highlighted fields.', 422, ['birthDate' => 'Use YYYY-MM-DD.']);
+        }
+        $addresses = $this->normalizeCustomerAddresses($input['addresses'] ?? []);
         $publicId = Security::uuid();
         $now = Security::now();
         try {
-            $this->database->execute(
-                'INSERT INTO users (public_id, role, username, email, password_hash, first_name, last_name, display_name, phone, date_of_birth, marketing_consent, status, must_change_password, email_verified_at, last_login_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-                [$publicId, 'customer', null, Security::normalizeEmail((string) $input['email']), Security::passwordHash((string) $input['password']), trim((string) $input['firstName']), trim((string) $input['lastName']), $input['displayName'] ?? null, $input['phone'] ?? null, null, 0, 'active', 1, null, null, $now, $now],
-            );
+            $this->database->transaction(function () use ($input, $addresses, $publicId, $birthDate, $now): void {
+                $this->database->execute(
+                    'INSERT INTO users (public_id, role, username, email, password_hash, first_name, last_name, display_name, phone, date_of_birth, marketing_consent, status, must_change_password, email_verified_at, last_login_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                    [$publicId, 'customer', null, Security::normalizeEmail((string) $input['email']), Security::passwordHash((string) $input['password']), trim((string) $input['firstName']), trim((string) ($input['lastName'] ?? '')), $input['displayName'] ?? null, $input['phone'] ?? null, $birthDate ?: null, !empty($input['marketingConsent']) ? 1 : 0, $input['status'] ?? 'active', 1, null, null, $now, $now],
+                );
+                $created = $this->database->fetchOne('SELECT id FROM users WHERE public_id = ?', [$publicId]);
+                if ($created !== null) $this->replaceCustomerAddresses((int) $created['id'], $addresses);
+            });
         } catch (PDOException $exception) {
             throw new ApiException('EMAIL_ALREADY_REGISTERED', 'An account already exists for this email address.', 409, ['email' => 'Use a unique email.'], $exception);
         }
@@ -884,22 +902,46 @@ final class AdminController
     {
         $raw = $this->findCustomerRaw($params['id']);
         $input = $request->json();
+        if (!isset($input['password']) && isset($input['temporaryPassword'])) $input['password'] = $input['temporaryPassword'];
         if (isset($input['fullName']) && (!isset($input['firstName']) || !isset($input['lastName']))) {
             $parts = preg_split('/\s+/', trim((string) $input['fullName']), 2) ?: [];
             $input['firstName'] = $parts[0] ?? '';
             $input['lastName'] = $parts[1] ?? '';
         }
         Validator::requireValid($input, [
-            'firstName' => 'sometimes|string|max:100', 'lastName' => 'sometimes|string|max:100', 'phone' => 'sometimes|nullable|string|max:40',
+            'email' => 'sometimes|string|email|max:191', 'firstName' => 'sometimes|string|max:100', 'lastName' => 'sometimes|string|max:100',
+            'phone' => 'sometimes|nullable|string|max:40', 'birthDate' => 'sometimes|nullable|string|max:10',
             'status' => 'sometimes|string|in:active,disabled', 'marketingConsent' => 'sometimes|bool',
+            'password' => 'sometimes|nullable|string|min:8|max:200', 'addresses' => 'sometimes|array',
         ]);
+        if (!empty($input['password'])) Validator::password((string) $input['password'], 8, false);
+        $birthDate = array_key_exists('birthDate', $input) ? ($input['birthDate'] ?: null) : ($raw['date_of_birth'] ?? null);
+        if ($birthDate !== null && !preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) $birthDate)) {
+            throw new ApiException('VALIDATION_FAILED', 'Please correct the highlighted fields.', 422, ['birthDate' => 'Use YYYY-MM-DD.']);
+        }
+        $addresses = array_key_exists('addresses', $input) ? $this->normalizeCustomerAddresses($input['addresses']) : null;
         $before = $this->mapCustomer($raw, true);
-        $this->database->execute(
-            'UPDATE users SET first_name = ?, last_name = ?, phone = ?, status = ?, marketing_consent = ?, updated_at = ? WHERE id = ?',
-            [$input['firstName'] ?? $raw['first_name'], $input['lastName'] ?? $raw['last_name'], array_key_exists('phone', $input) ? ($input['phone'] ?: null) : $raw['phone'], $input['status'] ?? $raw['status'], array_key_exists('marketingConsent', $input) ? (!empty($input['marketingConsent']) ? 1 : 0) : $raw['marketing_consent'], Security::now(), $raw['id']],
-        );
-        if (($input['status'] ?? null) === 'disabled') {
-            $this->database->execute('UPDATE auth_sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL', [Security::now(), $raw['id']]);
+        try {
+            $this->database->transaction(function () use ($input, $addresses, $birthDate, $raw): void {
+                $passwordHash = !empty($input['password']) ? Security::passwordHash((string) $input['password']) : $raw['password_hash'];
+                $mustChange = !empty($input['password']) ? 1 : (int) $raw['must_change_password'];
+                $email = array_key_exists('email', $input) ? Security::normalizeEmail((string) $input['email']) : $raw['email'];
+                $emailChanged = $email !== $raw['email'];
+                $this->database->execute(
+                    'UPDATE users SET email = ?, password_hash = ?, first_name = ?, last_name = ?, phone = ?, date_of_birth = ?, status = ?, marketing_consent = ?, must_change_password = ?, email_verified_at = ?, updated_at = ? WHERE id = ?',
+                    [$email, $passwordHash,
+                        $input['firstName'] ?? $raw['first_name'], $input['lastName'] ?? $raw['last_name'],
+                        array_key_exists('phone', $input) ? ($input['phone'] ?: null) : $raw['phone'], $birthDate,
+                        $input['status'] ?? $raw['status'], array_key_exists('marketingConsent', $input) ? (!empty($input['marketingConsent']) ? 1 : 0) : $raw['marketing_consent'],
+                        $mustChange, $emailChanged ? null : $raw['email_verified_at'], Security::now(), $raw['id']],
+                );
+                if ($addresses !== null) $this->replaceCustomerAddresses((int) $raw['id'], $addresses);
+                if (!empty($input['password']) || $emailChanged || ($input['status'] ?? null) === 'disabled') {
+                    $this->database->execute('UPDATE auth_sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL', [Security::now(), $raw['id']]);
+                }
+            });
+        } catch (PDOException $exception) {
+            throw new ApiException('EMAIL_ALREADY_REGISTERED', 'An account already exists for this email address.', 409, ['email' => 'Use a unique email.'], $exception);
         }
         $after = $this->mapCustomer($this->findCustomerRaw($params['id']), true);
         $this->audit->log($context, $request, 'customer.updated', 'user', $params['id'], $before, $after);
@@ -1042,8 +1084,68 @@ final class AdminController
                 'postcode' => (string) $address['postcode'], 'state' => (string) $address['state'], 'country' => $address['country_code'] === 'MY' ? 'Malaysia' : (string) $address['country_code'],
                 'isDefault' => (bool) $address['is_default_shipping'],
             ], $this->database->fetchAll('SELECT * FROM user_addresses WHERE user_id = ? ORDER BY is_default_shipping DESC, created_at', [$row['id']]));
+            $customer['orders'] = $this->orders->customerOrders((int) $row['id']);
+            $customer['referralLinks'] = array_values(array_filter(
+                $this->referrals->links(),
+                static fn (array $link): bool => $link['referrerUserId'] === (string) $row['public_id'],
+            ));
+            $referredBy = $this->database->fetchOne(
+                'SELECT rl.code, rl.name, cr.attributed_at FROM customer_referrals cr JOIN referral_links rl ON rl.id = cr.referral_link_id WHERE cr.user_id = ?',
+                [$row['id']],
+            );
+            $customer['referredBy'] = $referredBy === null ? null : [
+                'code' => (string) $referredBy['code'], 'name' => (string) $referredBy['name'], 'attributedAt' => $referredBy['attributed_at'],
+            ];
         }
         return $customer;
+    }
+
+    /** @param mixed $input @return list<array<string,mixed>> */
+    private function normalizeCustomerAddresses(mixed $input): array
+    {
+        if (!is_array($input)) throw new ApiException('VALIDATION_FAILED', 'Please correct the highlighted fields.', 422, ['addresses' => 'Addresses must be a list.']);
+        $addresses = [];
+        foreach (array_values($input) as $index => $address) {
+            if (!is_array($address)) throw new ApiException('VALIDATION_FAILED', 'Please correct the highlighted fields.', 422, ['addresses' => 'Each address must be complete.']);
+            Validator::requireValid($address, [
+                'label' => 'required|string|max:80', 'recipientName' => 'required|string|max:200', 'phone' => 'required|string|max:40',
+                'line1' => 'required|string|max:255', 'line2' => 'sometimes|nullable|string|max:255', 'city' => 'required|string|max:120',
+                'state' => 'required|string|max:120', 'postcode' => 'required|string|max:20', 'country' => 'required|string|max:120', 'isDefault' => 'sometimes|bool',
+            ]);
+            if (($address['country'] ?? 'Malaysia') === 'Malaysia' && !preg_match('/^\d{5}$/', (string) $address['postcode'])) {
+                throw new ApiException('VALIDATION_FAILED', 'Please correct the highlighted fields.', 422, ["addresses.{$index}.postcode" => 'Enter a five-digit Malaysian postcode.']);
+            }
+            $addresses[] = [
+                'id' => isset($address['id']) && $address['id'] !== '' ? (string) $address['id'] : Security::uuid(),
+                'label' => trim((string) $address['label']), 'recipientName' => trim((string) $address['recipientName']),
+                'phone' => trim((string) $address['phone']), 'line1' => trim((string) $address['line1']),
+                'line2' => trim((string) ($address['line2'] ?? '')) ?: null, 'city' => trim((string) $address['city']),
+                'state' => trim((string) $address['state']), 'postcode' => trim((string) $address['postcode']),
+                'countryCode' => ($address['country'] ?? 'Malaysia') === 'Malaysia' ? 'MY' : trim((string) $address['country']),
+                'isDefault' => !empty($address['isDefault']),
+            ];
+        }
+        if ($addresses !== [] && !array_filter($addresses, static fn (array $address): bool => $address['isDefault'])) $addresses[0]['isDefault'] = true;
+        $foundDefault = false;
+        foreach ($addresses as &$address) {
+            if ($address['isDefault'] && !$foundDefault) $foundDefault = true;
+            elseif ($address['isDefault']) $address['isDefault'] = false;
+        }
+        unset($address);
+        return $addresses;
+    }
+
+    /** @param list<array<string,mixed>> $addresses */
+    private function replaceCustomerAddresses(int $userId, array $addresses): void
+    {
+        $this->database->execute('DELETE FROM user_addresses WHERE user_id = ?', [$userId]);
+        $now = Security::now();
+        foreach ($addresses as $address) {
+            $this->database->execute(
+                'INSERT INTO user_addresses (public_id, user_id, label, recipient_name, phone, line1, line2, city, state, postcode, country_code, is_default_shipping, is_default_billing, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                [$address['id'], $userId, $address['label'], $address['recipientName'], $address['phone'], $address['line1'], $address['line2'], $address['city'], $address['state'], $address['postcode'], $address['countryCode'], $address['isDefault'] ? 1 : 0, $address['isDefault'] ? 1 : 0, $now, $now],
+            );
+        }
     }
 
     /** @return array<string,mixed> */

@@ -1,5 +1,5 @@
 import { requireAdmin, requireOwner } from "./auth";
-import { hashPassword, isAcceptableCustomerPassword, normalizeEmail, normalizeUsername, randomId } from "./crypto";
+import { hashPassword, isAcceptableCustomerPassword, normalizeEmail, normalizePhone, normalizeUsername, randomId } from "./crypto";
 import { allRows } from "./database";
 import {
   ApiError,
@@ -1529,51 +1529,145 @@ export async function handleAdminOrders(
   return ok({ order: saved });
 }
 
-export async function handleAdminCustomers(
-  request: Request,
-  db: D1Database,
-): Promise<Response> {
-  await requireAdmin(request, db);
-  const customers = await allRows<{
-    id: string;
-    email: string;
-    fullName: string;
-    phone: string | null;
-    birthDate: string | null;
-    marketingConsent: number;
-    createdAt: number;
-    orderCount: number;
-    totalSpentMinor: number;
-    lastOrderAt: number | null;
-  }>(
-    db.prepare(`SELECT u.id, u.email, p.full_name AS fullName, p.phone_e164 AS phone,
+type AdminCustomerRow = {
+  id: string; email: string; status: string; mustChangePassword: number; emailVerifiedAt: number | null;
+  lastLoginAt: number | null; fullName: string; phone: string | null; birthDate: string | null;
+  marketingConsent: number; createdAt: number; orderCount: number; totalSpentMinor: number; lastOrderAt: number | null;
+};
+
+async function adminCustomerList(db: D1Database) {
+  const customers = await allRows<AdminCustomerRow>(db.prepare(`SELECT u.id, u.email, u.status,
+    u.must_change_password AS mustChangePassword, u.email_verified_at AS emailVerifiedAt,
+    u.last_login_at AS lastLoginAt, p.full_name AS fullName, p.phone_e164 AS phone,
     p.birth_date AS birthDate, p.marketing_consent AS marketingConsent, u.created_at AS createdAt,
     COUNT(o.id) AS orderCount,
     COALESCE(SUM(CASE WHEN o.payment_status = 'PAID' THEN o.total_minor ELSE 0 END), 0) AS totalSpentMinor,
-    MAX(o.placed_at) AS lastOrderAt
-    FROM users u JOIN customer_profiles p ON p.user_id = u.id
-    LEFT JOIN orders o ON o.user_id = u.id
-    WHERE u.role = 'CUSTOMER' AND u.deleted_at IS NULL
-    GROUP BY u.id ORDER BY u.created_at DESC`),
-  );
-  return ok({
-    customers: customers.map((customer) => ({
-      id: customer.id,
-      email: customer.email,
-      role: "customer",
-      fullName: customer.fullName,
-      phone: customer.phone ?? "",
-      birthDate: customer.birthDate ?? "",
-      marketingConsent: Boolean(customer.marketingConsent),
-      addresses: [],
-      createdAt: new Date(customer.createdAt * 1000).toISOString(),
-      orderCount: Number(customer.orderCount),
-      totalSpent: Number(customer.totalSpentMinor) / 100,
-      lastOrderAt: customer.lastOrderAt
-        ? new Date(customer.lastOrderAt * 1000).toISOString()
-        : undefined,
-    })),
+    MAX(o.placed_at) AS lastOrderAt FROM users u JOIN customer_profiles p ON p.user_id = u.id
+    LEFT JOIN orders o ON o.user_id = u.id WHERE u.role = 'CUSTOMER' AND u.deleted_at IS NULL
+    GROUP BY u.id ORDER BY u.created_at DESC`));
+  return customers.map((customer) => ({
+    id: customer.id, email: customer.email, role: "customer", status: customer.status.toLowerCase(),
+    fullName: customer.fullName, phone: customer.phone ?? "", birthDate: customer.birthDate ?? "",
+    marketingConsent: Boolean(customer.marketingConsent), addresses: [], mustChangePassword: Boolean(customer.mustChangePassword),
+    emailVerified: customer.emailVerifiedAt !== null,
+    emailVerifiedAt: customer.emailVerifiedAt ? new Date(customer.emailVerifiedAt * 1000).toISOString() : undefined,
+    lastLoginAt: customer.lastLoginAt ? new Date(customer.lastLoginAt * 1000).toISOString() : undefined,
+    createdAt: new Date(customer.createdAt * 1000).toISOString(), orderCount: Number(customer.orderCount),
+    totalSpent: Number(customer.totalSpentMinor) / 100,
+    lastOrderAt: customer.lastOrderAt ? new Date(customer.lastOrderAt * 1000).toISOString() : undefined,
+  }));
+}
+
+async function adminCustomerDetail(db: D1Database, id: string) {
+  const customer = (await adminCustomerList(db)).find((item) => item.id === id);
+  if (!customer) throw new ApiError(404, "CUSTOMER_NOT_FOUND", "The customer could not be found.");
+  const [addresses, orders, referralLinks, referredBy] = await Promise.all([
+    allRows<{ id: string; label: string; recipientName: string; phone: string; line1: string; line2: string | null; city: string; state: string; postcode: string; country: string; isDefault: number }>(db.prepare(`SELECT id, label, recipient_name AS recipientName, phone_e164 AS phone, line1, line2, city, state, postcode,
+      country_code AS country, is_default_shipping AS isDefault FROM customer_addresses WHERE user_id = ? ORDER BY is_default_shipping DESC, created_at`).bind(id)),
+    allRows<{ id: string; orderNumber: string; createdAt: number; status: string; paymentStatus: string; totalMinor: number }>(db.prepare(`SELECT id, order_number AS orderNumber, placed_at AS createdAt, status, payment_status AS paymentStatus, total_minor AS totalMinor
+      FROM orders WHERE user_id = ? ORDER BY placed_at DESC LIMIT 100`).bind(id)),
+    allRows<{ id: string; code: string; name: string; status: string; commissionBasisPoints: number; discountBasisPoints: number; discountScope: string }>(db.prepare(`SELECT id, code, name, status, commission_basis_points AS commissionBasisPoints,
+      discount_basis_points AS discountBasisPoints, discount_scope AS discountScope FROM referral_links WHERE referrer_user_id = ? ORDER BY created_at DESC`).bind(id)),
+    db.prepare(`SELECT rl.code, rl.name, cr.attributed_at AS attributedAt FROM customer_referrals cr
+      JOIN referral_links rl ON rl.id = cr.referral_link_id WHERE cr.user_id = ?`).bind(id)
+      .first<{ code: string; name: string; attributedAt: number }>(),
+  ]);
+  return {
+    ...customer,
+    addresses: addresses.map((address) => ({ ...address, line2: address.line2 ?? "", country: address.country === "MY" ? "Malaysia" : address.country, isDefault: Boolean(address.isDefault) })),
+    orders: orders.map((order) => ({ id: order.id, orderNumber: order.orderNumber, createdAt: new Date(order.createdAt * 1000).toISOString(),
+      status: order.status.toLowerCase(), paymentStatus: order.paymentStatus.toLowerCase(), total: Number(order.totalMinor) / 100 })),
+    referralLinks: referralLinks.map((link) => ({ id: link.id, code: link.code, name: link.name, active: link.status === "ACTIVE",
+      commissionPercent: Number(link.commissionBasisPoints) / 100, discountPercent: Number(link.discountBasisPoints) / 100,
+      discountScope: link.discountScope.toLowerCase() })),
+    referredBy: referredBy ? { code: referredBy.code, name: referredBy.name, attributedAt: new Date(referredBy.attributedAt * 1000).toISOString() } : null,
+  };
+}
+
+type AdminAddress = { label: string; recipientName: string; phone: string; line1: string; line2: string | null; city: string; state: string; postcode: string; country: string; isDefault: boolean };
+
+function adminAddresses(value: unknown): AdminAddress[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) throw new ApiError(422, "VALIDATION_ERROR", "Addresses must be a list.", { addresses: "Addresses must be a list." });
+  const addresses = value.map((item, index) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) throw new ApiError(422, "VALIDATION_ERROR", "Complete every address.", { addresses: "Complete every address." });
+    const body = item as Record<string, unknown>;
+    const postcode = requiredString(body.postcode, `addresses.${index}.postcode`, { min: 4, max: 10 });
+    const country = requiredString(body.country ?? "Malaysia", `addresses.${index}.country`, { min: 2, max: 80 });
+    if (country === "Malaysia" && !/^\d{5}$/u.test(postcode)) throw new ApiError(422, "VALIDATION_ERROR", "Enter a five-digit Malaysian postcode.", { [`addresses.${index}.postcode`]: "Enter five digits." });
+    return { label: requiredString(body.label, `addresses.${index}.label`, { min: 1, max: 40 }),
+      recipientName: requiredString(body.recipientName, `addresses.${index}.recipientName`, { min: 2, max: 120 }),
+      phone: normalizePhone(requiredString(body.phone, `addresses.${index}.phone`, { min: 7, max: 30 })),
+      line1: requiredString(body.line1, `addresses.${index}.line1`, { min: 3, max: 180 }),
+      line2: optionalString(body.line2, `addresses.${index}.line2`, 180), city: requiredString(body.city, `addresses.${index}.city`, { min: 2, max: 100 }),
+      state: requiredString(body.state, `addresses.${index}.state`, { min: 2, max: 100 }), postcode, country,
+      isDefault: booleanField(body.isDefault, false) };
   });
+  let defaultFound = false;
+  return addresses.map((address, index) => ({ ...address, isDefault: address.isDefault && !defaultFound
+    ? (defaultFound = true) : (!defaultFound && index === 0 && !addresses.some((item) => item.isDefault) ? (defaultFound = true) : false) }));
+}
+
+function addressStatements(db: D1Database, userId: string, addresses: AdminAddress[]): D1PreparedStatement[] {
+  return [db.prepare("DELETE FROM customer_addresses WHERE user_id = ?").bind(userId), ...addresses.map((address) => db.prepare(`INSERT INTO customer_addresses
+    (id, user_id, label, recipient_name, phone_e164, line1, line2, city, state, postcode, country_code, is_default_shipping, is_default_billing)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .bind(randomId("address"), userId, address.label, address.recipientName, address.phone, address.line1, address.line2,
+      address.city, address.state, address.postcode, address.country === "Malaysia" ? "MY" : address.country,
+      address.isDefault ? 1 : 0, address.isDefault ? 1 : 0))];
+}
+
+export async function handleAdminCustomers(request: Request, db: D1Database, id?: string): Promise<Response> {
+  const session = await requireAdmin(request, db, { mutation: request.method !== "GET" });
+  if (request.method === "GET") return ok(id ? { customer: await adminCustomerDetail(db, id) } : { customers: await adminCustomerList(db) });
+  if (request.method === "DELETE") {
+    if (!id) throw new ApiError(404, "CUSTOMER_NOT_FOUND", "The customer could not be found.");
+    const current = await adminCustomerDetail(db, id);
+    await db.batch([db.prepare("UPDATE users SET status = 'DISABLED', updated_at = unixepoch() WHERE id = ?").bind(id),
+      db.prepare("UPDATE user_sessions SET revoked_at = unixepoch() WHERE user_id = ? AND revoked_at IS NULL").bind(id),
+      auditStatement(db, session, "DISABLE", "CUSTOMER", id, current)]);
+    return ok({ deleted: true, customer: await adminCustomerDetail(db, id) });
+  }
+  const body = await readJson<Record<string, unknown>>(request);
+  const current = id ? await db.prepare(`SELECT u.id, u.email, u.status, u.must_change_password AS mustChangePassword,
+    p.full_name AS fullName, p.phone_e164 AS phone, p.birth_date AS birthDate, p.marketing_consent AS marketingConsent
+    FROM users u JOIN customer_profiles p ON p.user_id = u.id WHERE u.id = ? AND u.role = 'CUSTOMER' AND u.deleted_at IS NULL`).bind(id)
+    .first<{ id: string; email: string; status: string; mustChangePassword: number; fullName: string; phone: string | null; birthDate: string | null; marketingConsent: number }>() : null;
+  if (id && !current) throw new ApiError(404, "CUSTOMER_NOT_FOUND", "The customer could not be found.");
+  const fullName = body.fullName === undefined && current ? current.fullName : requiredString(body.fullName, "fullName", { min: 2, max: 120 });
+  const email = normalizeEmail(body.email === undefined && current ? current.email : requiredString(body.email, "email", { min: 3, max: 254 }));
+  if (!/^\S+@\S+\.\S+$/u.test(email)) throw new ApiError(422, "VALIDATION_ERROR", "Enter a valid email address.", { email: "Enter a valid email address." });
+  const phone = body.phone === undefined && current ? current.phone : normalizePhone(requiredString(body.phone, "phone", { min: 7, max: 30 }));
+  const birthDate = body.birthDate === undefined && current ? current.birthDate : optionalString(body.birthDate, "birthDate", 10);
+  if (birthDate && !/^\d{4}-\d{2}-\d{2}$/u.test(birthDate)) throw new ApiError(422, "VALIDATION_ERROR", "Use YYYY-MM-DD for the birth date.", { birthDate: "Use YYYY-MM-DD." });
+  const status = String(body.status ?? current?.status ?? "ACTIVE").toUpperCase();
+  if (!["ACTIVE", "DISABLED"].includes(status)) throw new ApiError(422, "VALIDATION_ERROR", "Choose active or disabled status.");
+  const marketingConsent = booleanField(body.marketingConsent, Boolean(current?.marketingConsent));
+  const temporaryPassword = optionalString(body.temporaryPassword ?? body.password, "temporaryPassword", 128);
+  if (!current && !temporaryPassword) throw new ApiError(422, "VALIDATION_ERROR", "Set a temporary password.", { temporaryPassword: "Set at least 8 characters." });
+  if (temporaryPassword && !isAcceptableCustomerPassword(temporaryPassword)) throw new ApiError(422, "VALIDATION_ERROR", "Use at least 8 characters.", { temporaryPassword: "Use 8 to 128 characters." });
+  const userId = id ?? randomId("user");
+  const addresses = body.addresses === undefined && current ? null : adminAddresses(body.addresses);
+  const statements: D1PreparedStatement[] = [];
+  if (current) {
+    const emailChanged = email !== current.email;
+    statements.push(db.prepare("UPDATE users SET email = ?, email_normalized = ?, status = ?, email_verified_at = CASE WHEN ? = 1 THEN NULL ELSE email_verified_at END, updated_at = unixepoch() WHERE id = ?").bind(email, email, status, emailChanged ? 1 : 0, userId),
+      db.prepare(`UPDATE customer_profiles SET full_name = ?, phone_e164 = ?, birth_date = ?, marketing_consent = ?,
+        marketing_consent_source = CASE WHEN ? = 1 THEN 'admin' ELSE NULL END, marketing_consent_at = CASE WHEN ? = 1 THEN COALESCE(marketing_consent_at, unixepoch()) ELSE NULL END,
+        updated_at = unixepoch() WHERE user_id = ?`).bind(fullName, phone, birthDate, marketingConsent ? 1 : 0, marketingConsent ? 1 : 0, marketingConsent ? 1 : 0, userId));
+    if (temporaryPassword) statements.push(db.prepare("UPDATE users SET password_hash = ?, must_change_password = 1, password_changed_at = unixepoch(), updated_at = unixepoch() WHERE id = ?").bind(await hashPassword(temporaryPassword), userId));
+    if (emailChanged) statements.push(db.prepare("UPDATE user_sessions SET revoked_at = unixepoch() WHERE user_id = ? AND revoked_at IS NULL").bind(userId));
+  } else {
+    statements.push(db.prepare(`INSERT INTO users (id, email, email_normalized, password_hash, role, status, must_change_password)
+      VALUES (?, ?, ?, ?, 'CUSTOMER', ?, 1)`).bind(userId, email, email, await hashPassword(temporaryPassword!), status),
+      db.prepare(`INSERT INTO customer_profiles (user_id, full_name, phone_e164, birth_date, marketing_consent, marketing_consent_source, marketing_consent_at)
+      VALUES (?, ?, ?, ?, ?, ?, CASE WHEN ? = 1 THEN unixepoch() ELSE NULL END)`).bind(userId, fullName, phone, birthDate, marketingConsent ? 1 : 0, marketingConsent ? "admin" : null, marketingConsent ? 1 : 0));
+  }
+  if (addresses !== null) statements.push(...addressStatements(db, userId, addresses));
+  if (temporaryPassword || status === "DISABLED") statements.push(db.prepare("UPDATE user_sessions SET revoked_at = unixepoch() WHERE user_id = ? AND revoked_at IS NULL").bind(userId));
+  statements.push(auditStatement(db, session, current ? "UPDATE" : "CREATE", "CUSTOMER", userId, { fullName, email, phone, birthDate, status, marketingConsent, addresses: addresses?.length }));
+  try { await db.batch(statements); } catch { throw new ApiError(409, "EMAIL_IN_USE", "An account already uses this email address.", { email: "Use a unique email." }); }
+  return ok({ customer: await adminCustomerDetail(db, userId) }, current ? 200 : 201);
 }
 
 async function loadAdminEnquiries(db: D1Database) {

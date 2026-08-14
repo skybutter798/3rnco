@@ -78,7 +78,15 @@ type AdminCustomer = CustomerProfile & {
   orderCount?: number;
   totalSpent?: number;
   lastOrderAt?: string;
+  status?: "active" | "disabled" | string;
+  emailVerified?: boolean;
+  emailVerifiedAt?: string;
+  lastLoginAt?: string;
+  orders?: StoreOrder[];
+  referralLinks?: ReferralLink[];
+  referredBy?: { code: string; name: string; attributedAt?: string } | null;
 };
+type CustomerEditorDraft = AdminCustomer & { temporaryPassword: string };
 type DashboardData = {
   revenue?: number;
   paidOrders?: number;
@@ -161,6 +169,15 @@ const blankReferral: ReferralLink = {
   attributionDays: 30,
   active: true,
 };
+const blankAdminAddress = {
+  label: "Home", recipientName: "", phone: "", line1: "", line2: "", city: "",
+  postcode: "", state: "Kuala Lumpur", country: "Malaysia", isDefault: true,
+};
+const blankAdminCustomer: CustomerEditorDraft = {
+  id: "", email: "", fullName: "", phone: "", role: "customer", birthDate: "",
+  marketingConsent: false, addresses: [], status: "active", temporaryPassword: "",
+};
+const adminMalaysiaStates = ["Johor", "Kedah", "Kelantan", "Kuala Lumpur", "Labuan", "Melaka", "Negeri Sembilan", "Pahang", "Penang", "Perak", "Perlis", "Putrajaya", "Sabah", "Sarawak", "Selangor", "Terengganu"];
 
 function listFrom<T>(value: unknown, keys: string[]): T[] {
   if (Array.isArray(value)) return value as T[];
@@ -252,6 +269,7 @@ export default function AdminDashboard(props: Props) {
   const [slideEditor, setSlideEditor] = useState<Slide | null>(null);
   const [promoEditor, setPromoEditor] = useState<Promo | null>(null);
   const [referralEditor, setReferralEditor] = useState<ReferralLink | null>(null);
+  const [customerEditor, setCustomerEditor] = useState<CustomerEditorDraft | null>(null);
   const [activeEnquiryId, setActiveEnquiryId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -538,6 +556,38 @@ export default function AdminDashboard(props: Props) {
     setReferrals((current) => creating ? [saved, ...current] : current.map((link) => link.id === saved.id ? saved : link));
     setReferralEditor(null);
     setNotice(`${saved.code} referral link saved.`);
+  };
+
+  const openCustomer = async (customer?: AdminCustomer) => {
+    if (!customer) {
+      setCustomerEditor({ ...blankAdminCustomer, addresses: [] });
+      return;
+    }
+    setCustomerEditor({ ...customer, addresses: [...(customer.addresses || [])], temporaryPassword: "" });
+    try {
+      const result = await apiRequest<unknown>(`/admin/customers/${customer.id}`);
+      const detailed = itemFrom<AdminCustomer>(result, ["customer"]);
+      setCustomerEditor({ ...detailed, addresses: [...(detailed.addresses || [])], temporaryPassword: "" });
+    } catch (reason) {
+      setLoadError(errorMessage(reason));
+      setCustomerEditor(null);
+    }
+  };
+
+  const saveCustomer = async (draft: CustomerEditorDraft) => {
+    const creating = !draft.id;
+    const body = {
+      fullName: draft.fullName, email: draft.email, phone: draft.phone || "", birthDate: draft.birthDate || null,
+      status: draft.status || "active", marketingConsent: !!draft.marketingConsent,
+      temporaryPassword: draft.temporaryPassword || undefined, addresses: draft.addresses,
+    };
+    const result = await apiRequest<unknown>(creating ? "/admin/customers" : `/admin/customers/${draft.id}`, {
+      method: creating ? "POST" : "PATCH", body,
+    });
+    const saved = itemFrom<AdminCustomer>(result, ["customer"]);
+    setCustomers((current) => creating ? [saved, ...current] : current.map((item) => item.id === saved.id ? saved : item));
+    setCustomerEditor(null);
+    setNotice(`${saved.fullName} customer account saved.`);
   };
 
   const deleteReferral = async (link: ReferralLink) => {
@@ -963,8 +1013,10 @@ export default function AdminDashboard(props: Props) {
               <AdminHeading
                 eyebrow="Community"
                 title="Customers"
-                copy="Registered customer profiles and their order relationship."
-              />
+                copy="Create accounts, manage personal details and delivery addresses, reset access, and review every customer's commerce history."
+              >
+                <button className="button button--dark" onClick={() => void openCustomer()} disabled={locked}><Plus size={16} />Add customer</button>
+              </AdminHeading>
               {!customers.length ? (
                 <AdminEmpty
                   icon={<Users />}
@@ -992,7 +1044,8 @@ export default function AdminDashboard(props: Props) {
                       <strong>
                         RM{Number(customer.totalSpent || 0).toFixed(2)}
                       </strong>
-                      <b>{customer.role}</b>
+                      <b>{customer.status || "active"}</b>
+                      <button type="button" onClick={() => void openCustomer(customer)}><Pencil size={14} />Manage</button>
                     </article>
                   ))}
                 </div>
@@ -1139,6 +1192,9 @@ export default function AdminDashboard(props: Props) {
           onClose={() => setReferralEditor(null)}
           onSave={saveReferral}
         />
+      )}
+      {customerEditor && (
+        <CustomerEditor customer={customerEditor} onClose={() => setCustomerEditor(null)} onSave={saveCustomer} />
       )}
     </main>
   );
@@ -2680,6 +2736,79 @@ function ReferralsView({
       </section>
     </>
   );
+}
+
+function CustomerEditor({ customer, onClose, onSave }: { customer: CustomerEditorDraft; onClose: () => void; onSave: (customer: CustomerEditorDraft) => Promise<void> }) {
+  const [draft, setDraft] = useState<CustomerEditorDraft>({ ...customer, addresses: customer.addresses.map((address) => ({ ...address })) });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const creating = !draft.id;
+  const updateAddress = (index: number, value: Partial<CustomerEditorDraft["addresses"][number]>) => setDraft((current) => ({
+    ...current,
+    addresses: current.addresses.map((address, itemIndex) => itemIndex === index ? { ...address, ...value } : value.isDefault ? { ...address, isDefault: false } : address),
+  }));
+  const addAddress = () => setDraft((current) => ({ ...current, addresses: [...current.addresses, {
+    ...blankAdminAddress, recipientName: current.fullName, phone: current.phone || "", isDefault: current.addresses.length === 0,
+  }] }));
+  const removeAddress = (index: number) => setDraft((current) => {
+    const addresses = current.addresses.filter((_, itemIndex) => itemIndex !== index);
+    if (addresses.length && !addresses.some((address) => address.isDefault)) addresses[0] = { ...addresses[0], isDefault: true };
+    return { ...current, addresses };
+  });
+  const save = async (event: React.FormEvent) => {
+    event.preventDefault(); setBusy(true); setError("");
+    try { await onSave(draft); } catch (reason) { setError(errorMessage(reason)); } finally { setBusy(false); }
+  };
+  return <EditorShell title={creating ? "Add customer" : `Manage ${draft.fullName}`} onClose={onClose}>
+    <form className="editor-form customer-editor" onSubmit={save}>
+      <section className="customer-editor__section">
+        <div className="settings-section-heading"><div><p className="eyebrow">Account</p><h3>Customer details</h3></div><span className={`status-badge status-badge--${draft.status || "active"}`}>{draft.status || "active"}</span></div>
+        <div className="form-grid">
+          <label className="full">Full name<input value={draft.fullName} onChange={(event) => setDraft({ ...draft, fullName: event.target.value })} autoComplete="off" required /></label>
+          <label>Email address<input type="email" value={draft.email} onChange={(event) => setDraft({ ...draft, email: event.target.value })} autoComplete="off" required /></label>
+          <label>Mobile number<input value={draft.phone || ""} onChange={(event) => setDraft({ ...draft, phone: event.target.value })} autoComplete="off" required /></label>
+          <label>Date of birth<input type="date" value={draft.birthDate || ""} onChange={(event) => setDraft({ ...draft, birthDate: event.target.value })} /></label>
+          <label>Account status<select value={draft.status || "active"} onChange={(event) => setDraft({ ...draft, status: event.target.value })}><option value="active">Active</option><option value="disabled">Disabled</option></select></label>
+          <label className="full">{creating ? "Temporary password" : "New temporary password (optional)"}<input type="password" value={draft.temporaryPassword} onChange={(event) => setDraft({ ...draft, temporaryPassword: event.target.value })} minLength={8} autoComplete="new-password" required={creating} /><small>{creating ? "Customer must change this password after first sign-in." : "Setting a password signs the customer out everywhere and requires a change at next sign-in."}</small></label>
+          <label className="check-field"><input type="checkbox" checked={!!draft.marketingConsent} onChange={(event) => setDraft({ ...draft, marketingConsent: event.target.checked })} />Customer agreed to receive marketing notes and offers</label>
+        </div>
+        {!creating && <div className="customer-security-grid">
+          <article><ShieldCheck /><span><b>{draft.emailVerified ? "Email verified" : "Email not verified"}</b><small>Verification state</small></span></article>
+          <article><LockKeyhole /><span><b>{draft.mustChangePassword ? "Password change required" : "Password current"}</b><small>Account access</small></span></article>
+          <article><Users /><span><b>{draft.lastLoginAt ? new Date(draft.lastLoginAt).toLocaleString("en-MY") : "Never signed in"}</b><small>Last login</small></span></article>
+        </div>}
+      </section>
+
+      <section className="customer-editor__section">
+        <div className="settings-section-heading"><div><p className="eyebrow">Delivery</p><h3>Saved addresses</h3></div><button type="button" className="button button--ghost" onClick={addAddress}><Plus size={14} />Add address</button></div>
+        {!draft.addresses.length ? <div className="customer-inline-empty">No delivery address saved.</div> : <div className="customer-address-editors">{draft.addresses.map((address, index) => <article key={address.id || index}>
+          <header><b>{address.label || `Address ${index + 1}`}</b><button type="button" onClick={() => removeAddress(index)} aria-label="Remove address"><Trash2 size={14} /></button></header>
+          <div className="form-grid">
+            <label>Label<input value={address.label} onChange={(event) => updateAddress(index, { label: event.target.value })} required /></label>
+            <label>Recipient<input value={address.recipientName} onChange={(event) => updateAddress(index, { recipientName: event.target.value })} required /></label>
+            <label>Phone<input value={address.phone} onChange={(event) => updateAddress(index, { phone: event.target.value })} required /></label>
+            <label>Postcode<input value={address.postcode} maxLength={5} onChange={(event) => updateAddress(index, { postcode: event.target.value.replace(/\D/g, "") })} required /></label>
+            <label className="full">Address line 1<input value={address.line1} onChange={(event) => updateAddress(index, { line1: event.target.value })} required /></label>
+            <label className="full">Address line 2<input value={address.line2 || ""} onChange={(event) => updateAddress(index, { line2: event.target.value })} /></label>
+            <label>City<input value={address.city} onChange={(event) => updateAddress(index, { city: event.target.value })} required /></label>
+            <label>State<select value={address.state} onChange={(event) => updateAddress(index, { state: event.target.value })}>{adminMalaysiaStates.map((state) => <option key={state}>{state}</option>)}</select></label>
+            <label className="check-field"><input type="checkbox" checked={!!address.isDefault} onChange={(event) => updateAddress(index, { isDefault: event.target.checked })} />Default delivery address</label>
+          </div>
+        </article>)}</div>}
+      </section>
+
+      {!creating && <section className="customer-editor__section">
+        <div className="settings-section-heading"><div><p className="eyebrow">Commerce</p><h3>Customer activity</h3></div></div>
+        <div className="customer-commerce-kpis"><article><span>Orders</span><strong>{draft.orderCount || 0}</strong></article><article><span>Paid value</span><strong>RM{Number(draft.totalSpent || 0).toFixed(2)}</strong></article><article><span>Member since</span><strong>{draft.createdAt ? new Date(draft.createdAt).toLocaleDateString("en-MY") : "—"}</strong></article></div>
+        <div className="customer-activity-grid">
+          <div><h4>Recent orders</h4>{!draft.orders?.length ? <p>No orders yet.</p> : draft.orders.map((order) => <article key={order.id}><span><b>{order.orderNumber || order.id}</b><small>{new Date(order.createdAt).toLocaleDateString("en-MY")}</small></span><strong>RM{Number(order.total).toFixed(2)}</strong><em>{order.status.replaceAll("_", " ")}</em></article>)}</div>
+          <div><h4>Referral relationship</h4>{draft.referredBy && <article><span><b>Referred via ?ref={draft.referredBy.code}</b><small>{draft.referredBy.name}</small></span></article>}{!draft.referralLinks?.length ? <p>No owned referral links.</p> : draft.referralLinks.map((link) => <article key={link.id}><span><b>?ref={link.code}</b><small>{link.commissionPercent}% commission · {link.discountPercent}% shopper discount</small></span><em>{link.active ? "active" : "paused"}</em></article>)}</div>
+        </div>
+      </section>}
+      {error && <p className="form-alert" role="alert">{error}</p>}
+      <div className="editor-actions"><button type="button" className="button button--ghost" onClick={onClose}>Cancel</button><button className="button button--dark" disabled={busy}><Save size={15} />{busy ? "Saving…" : "Save customer"}</button></div>
+    </form>
+  </EditorShell>;
 }
 
 function ReferralEditor({ referral, customers, onClose, onSave }: { referral: ReferralLink; customers: AdminCustomer[]; onClose: () => void; onSave: (link: ReferralLink) => Promise<void> }) {

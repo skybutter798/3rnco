@@ -38,7 +38,7 @@ import type { Env } from "./env";
 import { apiExceptionResponse, fail, methodNotAllowed } from "./http";
 import { handleAdminUpload, handleCustomerReceiptUpload, handleDeleteUpload, handleMedia, handlePaymentReceiptFile, handlePaymentReceiptReview } from "./media";
 import { handleStorefront } from "./storefront";
-import { handleAdminReferralCommissions, handleAdminReferrals, handleReferralResolve } from "./referrals";
+import { handleAccountReferrals, handleAdminReferralCommissions, handleAdminReferrals, handleReferralResolve } from "./referrals";
 
 function oneOf(method: string, allowed: string[]): Response | null {
   return allowed.includes(method) ? null : methodNotAllowed(allowed);
@@ -132,6 +132,10 @@ async function dispatchApi(request: Request, env: Env): Promise<Response> {
       const rejected = oneOf(method, ["GET", "POST"]);
       if (rejected) return rejected;
       return method === "GET" ? handleAccountOrders(request, env.DB) : handleCreateOrder(request, env.DB);
+    }
+    if (path === "/account/referrals") {
+      const rejected = oneOf(method, ["GET"]);
+      return rejected ?? handleAccountReferrals(request, env.DB);
     }
     const orderReceiptMatch = path.match(/^\/orders\/([^/]+)\/receipt$/u);
     if (orderReceiptMatch) {
@@ -265,8 +269,13 @@ async function dispatchApi(request: Request, env: Env): Promise<Response> {
       return rejected ?? handleAdminOrders(request, env.DB, decodeURIComponent(orderMatch[1]));
     }
     if (path === "/admin/customers") {
-      const rejected = oneOf(method, ["GET"]);
+      const rejected = oneOf(method, ["GET", "POST"]);
       return rejected ?? handleAdminCustomers(request, env.DB);
+    }
+    const customerMatch = path.match(/^\/admin\/customers\/([^/]+)$/u);
+    if (customerMatch) {
+      const rejected = oneOf(method, ["GET", "PATCH", "DELETE"]);
+      return rejected ?? handleAdminCustomers(request, env.DB, decodeURIComponent(customerMatch[1]));
     }
     if (path === "/admin/enquiries") {
       const rejected = oneOf(method, ["GET"]);
