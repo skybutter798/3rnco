@@ -138,6 +138,8 @@ test("includes persistent production commerce and clean seed contracts", async (
   assert.match(account, /View commissions/);
   assert.match(account, /my-referral-commission-report/);
   assert.match(account, /account-nav-label/);
+  assert.match(account, /referral-jump-button__label/);
+  assert.match(account, /referral-jump-button__count/);
   assert.match(admin, /Gift & ritual set builder/);
   assert.match(admin, /Fixed amount \(RM\)/);
   assert.match(admin, /Percentage \(%\)/);
@@ -196,6 +198,14 @@ test("includes persistent production commerce and clean seed contracts", async (
   assert.match(
     productionCss,
     /\.account-home > nav button\s*\{[^}]*flex-direction:\s*column;/s,
+  );
+  assert.match(
+    productionCss,
+    /button:not\(\.button\):not\(\.referral-jump-button\)/,
+  );
+  assert.match(
+    productionCss,
+    /\.account-referrals \.referral-jump-button\s*\{[^}]*display:\s*inline-grid;[^}]*grid-template-columns:/s,
   );
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
   assert.match(packageJson, /cross-env WRANGLER_LOG_PATH/);

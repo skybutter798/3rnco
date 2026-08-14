@@ -230,7 +230,7 @@
 .account-panel { position: relative; }
 .account-panel__heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 22px; }
 .account-panel__heading h3 { margin: 2px 0 0; font-family: var(--font-display); font-size: 32px; font-weight: 400; }
-.account-panel__heading > button:not(.button) { display: grid; width: 36px; height: 36px; place-items: center; background: transparent; }
+.account-panel__heading > button:not(.button):not(.referral-jump-button) { display: grid; width: 36px; height: 36px; place-items: center; background: transparent; }
 .account-form--profile { margin-top: 0; }
 .customer-password { margin-top: 22px; padding: 18px; border: 1px solid var(--line); background: rgba(255, 255, 255, 0.46); }
 .customer-password > div { display: grid; grid-template-columns: 40px 1fr auto; gap: 12px; align-items: center; }
@@ -266,10 +266,12 @@
 
 .account-referrals .account-panel__heading { align-items: flex-end; }
 .account-referrals .account-panel__heading p:last-child { max-width: 540px; margin: 6px 0 0; color: rgba(28,37,29,.58); font-size: 11px; }
-.referral-jump-button { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 7px; padding: 10px 12px; border: 1px solid rgba(49,90,59,.2); border-radius: 999px; background: rgba(49,90,59,.07); color: var(--olive); font-size: 10px; font-weight: 800; white-space: nowrap; }
-.referral-jump-button:hover { background: rgba(49,90,59,.12); }
-.referral-jump-button:focus-visible { outline: 2px solid var(--olive); outline-offset: 3px; }
-.referral-jump-button span { display: grid; min-width: 21px; height: 21px; place-items: center; border-radius: 999px; background: var(--olive); color: #fff; font-size: 9px; }
+.account-referrals .referral-jump-button { display: inline-grid; flex: 0 0 auto; width: auto; min-width: max-content; min-height: 42px; grid-template-columns: 16px auto 22px; place-items: center; gap: 8px; padding: 8px 10px 8px 13px; border: 1px solid rgba(49,90,59,.2); border-radius: 999px; background: rgba(49,90,59,.07); color: var(--olive); font-size: 10px; font-weight: 800; white-space: nowrap; }
+.account-referrals .referral-jump-button:hover { background: rgba(49,90,59,.12); }
+.account-referrals .referral-jump-button:focus-visible { outline: 2px solid var(--olive); outline-offset: 3px; }
+.referral-jump-button > svg { display: block; width: 16px; height: 16px; }
+.referral-jump-button__label { line-height: 1; }
+.referral-jump-button__count { display: grid; width: 22px; height: 22px; place-items: center; border-radius: 999px; background: var(--olive); color: #fff; font-size: 9px; line-height: 1; }
 .referral-wallet { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 14px; }
 .referral-wallet article { display: grid; gap: 4px; padding: 16px; border: 1px solid var(--line); background: var(--cream); }
 .referral-wallet span, .referral-wallet small { color: rgba(28,37,29,.54); font-size: 9px; }
@@ -680,7 +682,8 @@
   .account-nav-label { overflow: hidden; width: 100%; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
   .account-panel__heading { align-items: stretch; flex-direction: column; }
   .account-referrals .account-panel__heading { align-items: stretch; }
-  .referral-jump-button { justify-content: center; }
+  .account-referrals .referral-jump-button { width: 100%; min-width: 0; min-height: 46px; grid-template-columns: 22px minmax(0, 1fr) 24px; justify-self: stretch; padding: 9px 12px; border-radius: 10px; }
+  .referral-jump-button__label { overflow: hidden; text-align: center; text-overflow: ellipsis; }
   .account-form--profile .account-panel__heading { align-items: center; flex-direction: row; gap: 10px; margin-bottom: 14px; }
   .account-form--profile .account-panel__heading > div { min-width: 0; }
   .account-form--profile .account-panel__heading h3 { font-size: 24px; }

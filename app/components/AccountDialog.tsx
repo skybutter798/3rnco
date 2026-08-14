@@ -890,8 +890,8 @@ export default function AccountDialog({
                           }}
                         >
                           <WalletCards size={16} />
-                          View commissions
-                          <span>{referrals.commissions.length}</span>
+                          <span className="referral-jump-button__label">View commissions</span>
+                          <span className="referral-jump-button__count">{referrals.commissions.length}</span>
                         </button>
                       )}
                     </div>
