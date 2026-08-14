@@ -519,28 +519,28 @@ export default function AccountDialog({
                 onClick={() => setTab("profile")}
               >
                 <UserRound size={17} />
-                Profile
+                <span className="account-nav-label">Profile</span>
               </button>
               <button
                 className={tab === "addresses" ? "is-active" : ""}
                 onClick={() => setTab("addresses")}
               >
                 <MapPin size={17} />
-                Addresses
+                <span className="account-nav-label">Addresses</span>
               </button>
               <button
                 className={tab === "orders" ? "is-active" : ""}
                 onClick={() => setTab("orders")}
               >
                 <Package size={17} />
-                Orders
+                <span className="account-nav-label">Orders</span>
               </button>
               <button
                 className={tab === "referrals" ? "is-active" : ""}
                 onClick={() => setTab("referrals")}
               >
                 <Link2 size={17} />
-                My Referrals
+                <span className="account-nav-label">My Referrals</span>
               </button>
             </nav>
             {loadingAccount ? (

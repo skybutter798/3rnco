@@ -674,9 +674,10 @@
   .account-home > header p:last-child { overflow: hidden; margin: 5px 0 0; color: rgba(28,37,29,.54); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
   .account-home > header > button { flex: 0 0 auto; margin: 0 40px 0 auto; padding: 7px 0; font-size: 9px; }
   .account-home > nav { display: grid; grid-template-columns: repeat(4, 1fr); gap: 3px; margin: 16px 0; padding: 3px; border: 1px solid rgba(28,37,29,.08); border-radius: 9px; background: var(--cream); }
-  .account-home > nav button { justify-content: center; gap: 5px; min-width: 0; padding: 9px 5px; border-radius: 6px; font-size: 9px; }
+  .account-home > nav button { height: 56px; justify-content: center; flex-direction: column; gap: 4px; min-width: 0; padding: 6px 3px; border-radius: 6px; font-size: 8px; line-height: 1; }
   .account-home > nav button.is-active { border: 0; background: #fff; box-shadow: 0 2px 8px rgba(28,37,29,.07); }
-  .account-home > nav svg { width: 14px; }
+  .account-home > nav svg { flex: 0 0 auto; width: 15px; height: 15px; }
+  .account-nav-label { overflow: hidden; width: 100%; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
   .account-panel__heading { align-items: stretch; flex-direction: column; }
   .account-referrals .account-panel__heading { align-items: stretch; }
   .referral-jump-button { justify-content: center; }

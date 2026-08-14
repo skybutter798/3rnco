@@ -137,6 +137,7 @@ test("includes persistent production commerce and clean seed contracts", async (
   assert.match(account, /\/profile\/addresses/);
   assert.match(account, /View commissions/);
   assert.match(account, /my-referral-commission-report/);
+  assert.match(account, /account-nav-label/);
   assert.match(admin, /Gift & ritual set builder/);
   assert.match(admin, /Fixed amount \(RM\)/);
   assert.match(admin, /Percentage \(%\)/);
@@ -191,6 +192,10 @@ test("includes persistent production commerce and clean seed contracts", async (
   assert.doesNotMatch(
     productionCss,
     /(?:^|\n)\.referral-commission-table > div/,
+  );
+  assert.match(
+    productionCss,
+    /\.account-home > nav button\s*\{[^}]*flex-direction:\s*column;/s,
   );
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
   assert.match(packageJson, /cross-env WRANGLER_LOG_PATH/);

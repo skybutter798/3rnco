@@ -17,14 +17,21 @@ final class RateLimiter
     ) {
     }
 
-    public function consume(string $bucket, string $subject, int $limit, int $windowSeconds): void
+    public function consume(
+        string $bucket,
+        string $subject,
+        int $limit,
+        int $windowSeconds,
+        string $errorCode = 'RATE_LIMITED',
+        string $message = 'Too many requests. Please wait and try again.',
+    ): void
     {
         $hash = Security::keyedHash($bucket . '|' . $subject, $this->config);
         $now = new DateTimeImmutable('now', new DateTimeZone('UTC'));
         $nowString = $now->format('Y-m-d H:i:s');
         $cutoff = $now->modify('-' . $windowSeconds . ' seconds')->format('Y-m-d H:i:s');
 
-        $this->database->transaction(function () use ($hash, $limit, $windowSeconds, $now, $nowString, $cutoff): void {
+        $this->database->transaction(function () use ($hash, $limit, $windowSeconds, $now, $nowString, $cutoff, $errorCode, $message): void {
             if ($this->database->isMysql()) {
                 $this->database->execute(
                     'INSERT INTO rate_limits (bucket_hash, hits, window_started_at, updated_at) VALUES (?, 1, ?, ?) ' .
@@ -48,13 +55,19 @@ final class RateLimiter
                 $started = new DateTimeImmutable((string) $row['window_started_at'], new DateTimeZone('UTC'));
                 $elapsed = max(0, $now->getTimestamp() - $started->getTimestamp());
                 throw new ApiException(
-                    'RATE_LIMITED',
-                    'Too many requests. Please wait and try again.',
+                    $errorCode,
+                    $message,
                     429,
                     ['retryAfter' => max(1, $windowSeconds - $elapsed)],
                 );
             }
         });
+    }
+
+    public function clear(string $bucket, string $subject): void
+    {
+        $hash = Security::keyedHash($bucket . '|' . $subject, $this->config);
+        $this->database->execute('DELETE FROM rate_limits WHERE bucket_hash = ?', [$hash]);
     }
 }
 

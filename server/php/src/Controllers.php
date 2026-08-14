@@ -68,8 +68,17 @@ final class AuthController
             throw new ApiException('ALREADY_AUTHENTICATED', 'This browser is already signed in.', 409);
         }
         $identifier = Security::normalizeEmail((string) ($request->input('identifier') ?? $request->input('email') ?? $request->input('username') ?? $request->input('login') ?? ''));
-        $this->rateLimiter->consume('login-ip-identifier', $request->remoteAddress . '|' . $identifier, 8, 900);
+        $rateSubject = $request->remoteAddress . '|' . $identifier;
+        $this->rateLimiter->consume(
+            'login-ip-identifier',
+            $rateSubject,
+            12,
+            900,
+            'LOGIN_RATE_LIMITED',
+            'Too many failed sign-in attempts. Please wait 15 minutes and try again.',
+        );
         $result = $this->auth->login($context, $request->json(), $request);
+        $this->rateLimiter->clear('login-ip-identifier', $rateSubject);
         $this->audit->log(null, $request, 'auth.login', 'user', (string) ($result['user']['id'] ?? ''), null, ['role' => $result['user']['role'] ?? null]);
 
         return Response::success($result);

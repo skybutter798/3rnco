@@ -511,6 +511,9 @@ test('rate limiter atomically preserves the limit after a rejected hit', functio
     }
     $hash = Rnco\Security::keyedHash('automated-limit-test|one-subject', $config);
     assertSameValue(2, (int) $database->fetchOne('SELECT hits FROM rate_limits WHERE bucket_hash = ?', [$hash])['hits']);
+    $limiter->clear('automated-limit-test', 'one-subject');
+    assertSameValue(null, $database->fetchOne('SELECT hits FROM rate_limits WHERE bucket_hash = ?', [$hash]));
+    $limiter->consume('automated-limit-test', 'one-subject', 2, 60);
 });
 
 test('maintenance cleanup removes only stale session and rate-limit state', function () use ($database): void {
