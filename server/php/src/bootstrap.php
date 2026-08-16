@@ -13,6 +13,7 @@ require_once __DIR__ . '/Security.php';
 require_once __DIR__ . '/Migrator.php';
 require_once __DIR__ . '/Seeder.php';
 require_once __DIR__ . '/Auth.php';
+require_once __DIR__ . '/Notifications.php';
 require_once __DIR__ . '/Services.php';
 require_once __DIR__ . '/Controllers.php';
 require_once __DIR__ . '/App.php';

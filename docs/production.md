@@ -67,11 +67,12 @@ Example cPanel cron entries (adjust the PHP binary path if the host changes):
 
 ```cron
 */5 * * * * RNCO_ENV_FILE=/home/rncomy/3rnco_shared/.env /usr/local/bin/php /home/rncomy/3rnco_app/current/scripts/release-expired-orders.php >/dev/null 2>&1
+*/5 * * * * RNCO_ENV_FILE=/home/rncomy/3rnco_shared/.env /usr/local/bin/php /home/rncomy/3rnco_app/current/scripts/send-notifications.php >/dev/null 2>&1
 17 * * * * RNCO_ENV_FILE=/home/rncomy/3rnco_shared/.env /usr/local/bin/php /home/rncomy/3rnco_app/current/scripts/cleanup.php >/dev/null 2>&1
 17 3 * * * RNCO_ENV_FILE=/home/rncomy/3rnco_shared/.env /usr/local/bin/php /home/rncomy/3rnco_app/current/scripts/backup.php >/dev/null 2>&1
 ```
 
-The five-minute job releases expired pending-order inventory reservations. The hourly job removes expired/revoked sessions and stale rate-limit buckets. The daily job keeps the documented server-local database/upload retention set; pull its first successful output off-host immediately.
+The five-minute jobs release expired pending-order inventory reservations and retry failed business-event email notifications. The hourly job removes expired/revoked sessions and stale rate-limit buckets. The daily job keeps the documented server-local database/upload retention set; pull its first successful output off-host immediately.
 
 Do not manufacture inventory to make checkout appear available. A store operator must enter the real quantities under **Admin → Products**.
 

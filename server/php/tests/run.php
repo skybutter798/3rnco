@@ -15,7 +15,7 @@ use Rnco\Seeder;
 use Rnco\StoreRepository;
 
 $root = dirname(__DIR__);
-foreach (['Config', 'Database', 'Http', 'Security', 'Migrator', 'Seeder', 'Auth', 'Services', 'Controllers', 'App'] as $file) {
+foreach (['Config', 'Database', 'Http', 'Security', 'Migrator', 'Seeder', 'Auth', 'Notifications', 'Services', 'Controllers', 'App'] as $file) {
     require_once $root . '/src/' . $file . '.php';
 }
 
@@ -105,7 +105,7 @@ $app = new App($config, $database);
 $cookieName = $config->string('session.cookie');
 
 test('SQLite migration applies once and is idempotent', function () use ($applied, $migrator): void {
-    assertSameValue(['001_schema', '002_staff_payments', '003_care_led_hero', '004_warm_gentle_hero', '005_core_essence_hero', '006_referrals'], $applied);
+    assertSameValue(['001_schema', '002_staff_payments', '003_care_led_hero', '004_warm_gentle_hero', '005_core_essence_hero', '006_referrals', '007_mail_notifications'], $applied);
     assertSameValue([], $migrator->migrate());
 });
 
@@ -121,6 +121,7 @@ test('seed preserves content and starts operational tables empty', function () u
     assertSameValue(0, (int) $database->fetchOne('SELECT COUNT(*) AS aggregate FROM staff_profiles')['aggregate']);
     assertSameValue(0, (int) $database->fetchOne('SELECT COUNT(*) AS aggregate FROM payment_receipts')['aggregate']);
     assertSameValue(3, (int) $database->fetchOne('SELECT COUNT(*) AS aggregate FROM payment_methods')['aggregate']);
+    assertSameValue(0, (int) $database->fetchOne('SELECT COUNT(*) AS aggregate FROM notification_deliveries')['aggregate']);
     assertSameValue(0, (int) $database->fetchOne('SELECT SUM(stock_quantity) AS aggregate FROM products')['aggregate']);
     assertSameValue(4, $firstSeed['products']);
     assertSameValue(0, $secondSeed['products']);
@@ -292,6 +293,7 @@ test('atomic order creation decrements once and honors idempotency', function ()
     assertSameValue($first->body['data']['order']['id'], $second->body['data']['order']['id']);
     assertSameValue(1, (int) $database->fetchOne("SELECT stock_quantity FROM products WHERE id = 'body-cream'")['stock_quantity']);
     assertSameValue(1, (int) $database->fetchOne('SELECT COUNT(*) AS aggregate FROM orders')['aggregate']);
+    assertSameValue(1, (int) $database->fetchOne('SELECT COUNT(*) AS aggregate FROM notification_deliveries WHERE event_key = ?', ['order.created:' . $first->body['data']['order']['id']])['aggregate']);
 
     $differentBody = $body;
     $differentBody['shippingAddress']['line1'] = '2 Jalan Moringa';
@@ -317,6 +319,49 @@ test('promo CRUD and validation use server-side product prices', function () use
     assertSameValue(200, $promo->status);
     assertTrue($promo->body['data']['valid'] === true);
     assertSameValue(6.9, $promo->body['data']['discount']);
+});
+
+test('notification outbox is idempotent and records successful local transport', function () use ($config, $database): void {
+    $sent = [];
+    $mailConfig = Config::forTesting([
+        'db.database' => $config->string('db.database'),
+        'mail.enabled' => true,
+        'mail.recipient' => 'celine@example.test',
+        'mail.from_address' => 'celine@example.test',
+    ]);
+    $transport = static function (string $to, string $subject, string $body, string $headers, string $from) use (&$sent): bool {
+        $sent[] = compact('to', 'subject', 'body', 'headers', 'from');
+        return true;
+    };
+    $notifications = new Rnco\NotificationService($mailConfig, $database, $transport(...));
+    $order = [
+        'id' => 'notification-test-order', 'orderNumber' => '3R-TEST-ORDER', 'createdAt' => Rnco\Security::now(),
+        'customerName' => 'Mail Test', 'customerEmail' => 'buyer@example.test', 'paymentStatus' => 'pending',
+        'subtotal' => 69.0, 'discount' => 0.0, 'shipping' => 8.0, 'total' => 77.0,
+        'shippingAddress' => ['address1' => 'Test address', 'postcode' => '50000', 'city' => 'Kuala Lumpur', 'state' => 'Kuala Lumpur', 'phone' => '+60123456789'],
+        'lines' => [['name' => 'Body Cream', 'quantity' => 1, 'unitPrice' => 69.0]],
+    ];
+    $notifications->notifyNewOrder($order);
+    $notifications->notifyNewOrder($order);
+    $notifications->notifyPaymentReceiptSubmitted($order, [
+        'id' => 'notification-test-receipt', 'paymentMethodId' => 'duitnow_qr', 'customerReference' => 'TESTREF',
+        'customerNote' => 'Test proof', 'originalName' => 'receipt.png', 'createdAt' => Rnco\Security::now(),
+    ]);
+    $notifications->notifyNewEnquiry([
+        'id' => 'notification-test-enquiry', 'name' => 'Contact Test', 'email' => 'contact@example.test',
+        'phone' => '+60123456789', 'channel' => 'website', 'subject' => 'Product question',
+        'message' => 'Please tell me more about the body cream.', 'createdAt' => Rnco\Security::now(),
+    ]);
+
+    assertSameValue(3, count($sent));
+    assertSameValue('celine@example.test', $sent[0]['to']);
+    assertTrue(str_contains($sent[0]['subject'], '3R-TEST-ORDER'));
+    assertTrue(str_contains($sent[0]['body'], 'Body Cream x1'));
+    assertTrue(str_contains($sent[1]['subject'], 'Payment proof received'));
+    assertTrue(str_contains($sent[2]['headers'], 'Reply-To: contact@example.test'));
+    assertSameValue(3, (int) $database->fetchOne("SELECT COUNT(*) AS aggregate FROM notification_deliveries WHERE event_key LIKE '%notification-test-%'")['aggregate']);
+    assertSameValue(3, (int) $database->fetchOne("SELECT COUNT(*) AS aggregate FROM notification_deliveries WHERE event_key LIKE '%notification-test-%' AND status = 'sent' AND attempts = 1")['aggregate']);
+    $database->execute("DELETE FROM notification_deliveries WHERE event_key LIKE '%notification-test-%'");
 });
 
 test('referral links apply configurable discounts and pay commission on repeat downline orders', function () use ($app, $database, $cookieName, &$adminSession, &$customerSession): void {
@@ -483,6 +528,7 @@ test('public enquiries and newsletter persist without simulation seeds', functio
     $newsletter = callApi($app, 'POST', '/api/v1/newsletter', ['email' => 'alya@example.test'], ['X-CSRF-Token' => $customerSession['csrf']], [$cookieName => $customerSession['cookie']]);
     assertSameValue(200, $newsletter->status);
     assertSameValue(1, (int) $database->fetchOne('SELECT COUNT(*) AS aggregate FROM enquiries')['aggregate']);
+    assertSameValue(1, (int) $database->fetchOne('SELECT COUNT(*) AS aggregate FROM notification_deliveries WHERE event_key = ?', ['enquiry.created:' . $enquiry->body['data']['enquiry']['id']])['aggregate']);
     assertSameValue(1, (int) $database->fetchOne('SELECT COUNT(*) AS aggregate FROM newsletter_subscribers')['aggregate']);
 });
 

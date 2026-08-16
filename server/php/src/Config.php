@@ -35,6 +35,11 @@ final class Config
         $driver = strtolower((string) $get('DB_DRIVER', 'mysql'));
         $environment = strtolower((string) $get('APP_ENV', 'production'));
         $key = (string) $get('APP_KEY', '');
+        $origin = rtrim((string) $get('APP_ORIGIN', 'http://127.0.0.1:8080'), '/');
+        $mailEnabled = self::toBool($get('MAIL_ENABLED', false));
+        $mailRecipient = strtolower(trim((string) $get('MAIL_NOTIFICATION_TO', '')));
+        $mailFromAddress = strtolower(trim((string) $get('MAIL_FROM_ADDRESS', $mailRecipient)));
+        $mailFromName = trim((string) $get('MAIL_FROM_NAME', '3R&Co Notifications'));
         $bootstrapAdminIps = self::parseIpList((string) $get('BOOTSTRAP_ADMIN_IPS', ''));
 
         if ($environment === 'production' && strlen($key) < 32) {
@@ -47,12 +52,18 @@ final class Config
         if (!in_array($driver, ['mysql', 'sqlite'], true)) {
             throw new RuntimeException('DB_DRIVER must be mysql or sqlite.');
         }
+        if ($mailEnabled && (filter_var($mailRecipient, FILTER_VALIDATE_EMAIL) === false || filter_var($mailFromAddress, FILTER_VALIDATE_EMAIL) === false)) {
+            throw new RuntimeException('MAIL_NOTIFICATION_TO and MAIL_FROM_ADDRESS must be valid email addresses when mail is enabled.');
+        }
+        if (str_contains($mailFromName, "\r") || str_contains($mailFromName, "\n")) {
+            throw new RuntimeException('MAIL_FROM_NAME cannot contain line breaks.');
+        }
 
         return new self([
             'app.env' => $environment,
             'app.debug' => self::toBool($get('APP_DEBUG', false)),
             'app.key' => $key !== '' ? $key : 'local-test-key-change-me-32-characters',
-            'app.origin' => rtrim((string) $get('APP_ORIGIN', 'http://127.0.0.1:8080'), '/'),
+            'app.origin' => $origin,
             'app.public_root' => self::absolutePath((string) $get('PUBLIC_ROOT', $root . '/public')),
             'db.driver' => $driver,
             'db.host' => (string) $get('DB_HOST', '127.0.0.1'),
@@ -74,6 +85,12 @@ final class Config
             'upload.max_bytes' => max(1024, (int) $get('UPLOAD_MAX_BYTES', 7864320)),
             'receipt.dir' => self::absolutePath((string) $get('PAYMENT_RECEIPT_DIR', $root . '/var/payment-receipts')),
             'receipt.max_bytes' => max(1024, (int) $get('PAYMENT_RECEIPT_MAX_BYTES', 8388608)),
+            'mail.enabled' => $mailEnabled,
+            'mail.recipient' => $mailRecipient,
+            'mail.from_address' => $mailFromAddress,
+            'mail.from_name' => $mailFromName,
+            'mail.max_attempts' => max(1, min(20, (int) $get('MAIL_MAX_ATTEMPTS', 5))),
+            'mail.admin_url' => (string) $get('MAIL_ADMIN_URL', $origin . '/admin/'),
             'backup.dir' => self::absolutePath((string) $get('BACKUP_DIR', $root . '/var/backups')),
             'backup.upload_dir' => self::absolutePath((string) $get('BACKUP_UPLOAD_DIR', $root . '/var/uploads')),
             'backup.mysqldump' => (string) $get('MYSQLDUMP_BINARY', 'mysqldump'),
@@ -112,6 +129,12 @@ final class Config
             'upload.max_bytes' => 10485760,
             'receipt.dir' => $root . '/var/payment-receipts',
             'receipt.max_bytes' => 8388608,
+            'mail.enabled' => false,
+            'mail.recipient' => 'notifications@example.test',
+            'mail.from_address' => 'notifications@example.test',
+            'mail.from_name' => '3R&Co Notifications',
+            'mail.max_attempts' => 5,
+            'mail.admin_url' => 'http://localhost/admin/',
             'backup.dir' => $root . '/var/backups',
             'backup.upload_dir' => $root . '/var/uploads',
             'backup.mysqldump' => 'mysqldump',

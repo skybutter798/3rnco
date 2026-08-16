@@ -115,6 +115,7 @@ final class AccountController
         private readonly PaymentReceiptService $receipts,
         private readonly AuditLogger $audit,
         private readonly ReferralService $referrals,
+        private readonly NotificationService $notifications,
     ) {
     }
 
@@ -269,8 +270,10 @@ final class AccountController
         }
         $receipt = $this->receipts->store($file, (int) $order['id'], (int) $user['id'], $methodId, $reference, $note);
         $this->audit->log($context, $request, 'payment_receipt.submitted', 'order', (string) $order['public_id'], null, ['receiptId' => $receipt['id'], 'paymentMethodId' => $methodId]);
+        $orderView = $this->orders->getOrder((int) $order['id'], (int) $user['id']);
+        $this->notifications->notifyPaymentReceiptSubmitted($orderView, $receipt);
 
-        return Response::success(['receipt' => $receipt, 'order' => $this->orders->getOrder((int) $order['id'], (int) $user['id'])], 201);
+        return Response::success(['receipt' => $receipt, 'order' => $orderView], 201);
     }
 
     /** @return array<string, mixed> */
@@ -338,6 +341,7 @@ final class PublicController
         private readonly RateLimiter $rateLimiter,
         private readonly AuditLogger $audit,
         private readonly ReferralService $referrals,
+        private readonly NotificationService $notifications,
     ) {
     }
 
@@ -357,6 +361,7 @@ final class PublicController
         $idempotencyKey = $request->header('idempotency-key') ?? '';
         $order = $this->orders->create($context, $request->json(), $idempotencyKey);
         $this->audit->log($context, $request, 'order.created', 'order', (string) $order['id'], null, ['orderNumber' => $order['orderNumber'], 'total' => $order['total']]);
+        $this->notifications->notifyNewOrder($order);
 
         return Response::success(['order' => $order], 201);
     }
@@ -376,10 +381,22 @@ final class PublicController
         ]);
         $publicId = Security::uuid();
         $now = Security::now();
+        $enquiry = [
+            'id' => $publicId,
+            'name' => trim((string) $input['name']),
+            'email' => Security::normalizeEmail((string) $input['email']),
+            'phone' => $input['phone'] ?? null,
+            'channel' => $input['channel'] ?? 'website',
+            'subject' => trim((string) $input['subject']),
+            'message' => trim((string) $input['message']),
+            'status' => 'new',
+            'createdAt' => $now,
+        ];
         $this->database->execute(
             'INSERT INTO enquiries (public_id, user_id, name, email, phone, channel, subject, message, status, admin_notes, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            [$publicId, $context?->userId(), trim((string) $input['name']), Security::normalizeEmail((string) $input['email']), $input['phone'] ?? null, $input['channel'] ?? 'website', trim((string) $input['subject']), trim((string) $input['message']), 'new', null, $now, $now],
+            [$publicId, $context?->userId(), $enquiry['name'], $enquiry['email'], $enquiry['phone'], $enquiry['channel'], $enquiry['subject'], $enquiry['message'], 'new', null, $now, $now],
         );
+        $this->notifications->notifyNewEnquiry($enquiry);
         return Response::success(['enquiry' => ['id' => $publicId, 'status' => 'new', 'createdAt' => $now]], 201);
     }
 

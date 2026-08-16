@@ -22,14 +22,15 @@ final class App
         $audit = new AuditLogger($config, $database);
         $store = new StoreRepository($database);
         $referrals = new ReferralService($database);
+        $notifications = new NotificationService($config, $database);
         $orders = new OrderService($database, $store, $config, $referrals);
         $uploads = new UploadService($config, $database);
         $receipts = new PaymentReceiptService($config, $database);
 
         $storeController = new StoreController($store, $database);
         $authController = new AuthController($this->auth, $this->rateLimiter, $audit);
-        $accountController = new AccountController($database, $this->auth, $orders, $receipts, $audit, $referrals);
-        $publicController = new PublicController($database, $orders, $this->rateLimiter, $audit, $referrals);
+        $accountController = new AccountController($database, $this->auth, $orders, $receipts, $audit, $referrals, $notifications);
+        $publicController = new PublicController($database, $orders, $this->rateLimiter, $audit, $referrals, $notifications);
         $adminController = new AdminController($database, $store, $orders, $uploads, $receipts, $this->auth, $audit, $referrals);
 
         $this->routes($storeController, $authController, $accountController, $publicController, $adminController);
