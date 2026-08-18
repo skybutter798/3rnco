@@ -1604,45 +1604,32 @@ function AdminOrders({
       </div>
       {orders.map((order) => (
         <div role="row" key={order.id}>
-          <span>
+          <span data-label="Order">
             <b>{order.orderNumber || order.id}</b>
             <small>
               {new Date(order.createdAt).toLocaleDateString("en-MY")}
             </small>
           </span>
-          <span>
+          <span data-label="Customer">
             <b>{order.customerName || "Customer"}</b>
             <small>{order.customerEmail || ""}</small>
           </span>
-          <span>
+          <span data-label="Items">
             {order.lines
               ?.map((line) => `${line.name} ×${line.quantity}`)
               .join(", ") ||
               order.items ||
               "—"}
           </span>
-          <span>
+          <span data-label="Total">
             <b>RM{Number(order.total).toFixed(2)}</b>
             <small>{order.paymentMethod || "manual confirmation"}</small>
           </span>
-          <span>
+          <span data-label="Status">
             <Status status={order.status} />
           </span>
-          <span>
-            <select
-              value={order.status}
-              onChange={(event) => void onStatus(order, event.target.value)}
-              disabled={locked}
-              aria-label={`Update ${order.orderNumber || order.id}`}
-            >
-              <option value="pending_payment">Pending payment</option>
-              <option value="payment_confirmed">Payment confirmed</option>
-              <option value="processing">Processing</option>
-              <option value="packing">Packing</option>
-              <option value="shipped">Shipped</option>
-              <option value="delivered">Delivered</option>
-              <option value="cancelled">Cancelled</option>
-            </select>
+          <span data-label="Update">
+            <OrderStatusEditor key={`${order.id}:${order.status}`} order={order} locked={locked} onStatus={onStatus} />
             {order.paymentReceipt?.status === "submitted" && <div className="receipt-review">
               <a href={`/api/v1/admin/payment-receipts/${encodeURIComponent(order.paymentReceipt.id)}/file`} target="_blank" rel="noreferrer">View receipt</a>
               <button type="button" onClick={() => void onReceipt(order, "verified")} disabled={locked}>Verify</button>
@@ -1654,6 +1641,56 @@ function AdminOrders({
       ))}
     </div>
   );
+}
+
+function OrderStatusEditor({ order, locked, onStatus }: {
+  order: StoreOrder;
+  locked: boolean;
+  onStatus: (order: StoreOrder, status: string) => Promise<void>;
+}) {
+  const [draft, setDraft] = useState(order.status);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const changed = draft !== order.status;
+
+  const save = async () => {
+    if (!changed || saving || locked) return;
+    if (draft === "cancelled" && ["shipped", "delivered"].includes(order.status)) {
+      const confirmed = window.confirm(
+        `Cancel ${order.orderNumber || order.id}? This will restore its inventory, void any unpaid referral commission, and email the customer.`,
+      );
+      if (!confirmed) return;
+    }
+    setSaving(true);
+    setError("");
+    try {
+      await onStatus(order, draft);
+    } catch (reason) {
+      setError(errorMessage(reason));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return <div className="order-status-editor">
+    <div>
+      <select value={draft} onChange={(event) => setDraft(event.target.value)} disabled={locked || saving} aria-label={`Status for ${order.orderNumber || order.id}`}>
+        <option value="pending_payment">Pending payment</option>
+        <option value="payment_confirmed">Payment confirmed</option>
+        <option value="processing">Processing</option>
+        <option value="packing">Packing</option>
+        <option value="shipped">Shipped</option>
+        <option value="delivered">Delivered</option>
+        <option value="cancelled">Cancelled</option>
+      </select>
+      <button type="button" className="order-status-save" onClick={() => void save()} disabled={locked || saving || !changed}>
+        <Save size={13} />{saving ? "Saving..." : "Save status"}
+      </button>
+    </div>
+    <small className="order-status-email-note">Customer and admin are emailed after saving.</small>
+    {error && <small className="order-status-error" role="alert">{error}</small>}
+  </div>;
 }
 function Status({ status }: { status: string }) {
   return (

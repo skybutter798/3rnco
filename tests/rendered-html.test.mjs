@@ -140,6 +140,9 @@ test("includes persistent production commerce and clean seed contracts", async (
   assert.match(account, /account-nav-label/);
   assert.match(admin, /admin-mobile-menu/);
   assert.match(admin, /aria-controls="admin-navigation"/);
+  assert.match(admin, /Save status/);
+  assert.match(admin, /Customer and admin are emailed after saving/);
+  assert.match(admin, /order-status-editor/);
   assert.match(account, /referral-jump-button__label/);
   assert.match(account, /referral-jump-button__count/);
   assert.match(admin, /Gift & ritual set builder/);
@@ -184,6 +187,7 @@ test("includes persistent production commerce and clean seed contracts", async (
   assert.match(productionCss, /\.admin-control-grid/);
   assert.match(productionCss, /--orders-grid:/);
   assert.match(productionCss, /\.admin-orders-table\.orders-table/);
+  assert.match(productionCss, /\.order-status-save/);
   assert.match(productionCss, /grid-template-columns:\s*var\(--orders-grid\)/);
   assert.match(
     productionCss,

@@ -1190,10 +1190,10 @@ final class OrderService
         $allowed = [
             'pending_payment' => ['pending_payment', 'payment_confirmed', 'processing', 'packing', 'shipped', 'delivered', 'cancelled'],
             'payment_confirmed' => ['payment_confirmed', 'processing', 'packing', 'shipped', 'delivered', 'cancelled'],
-            'processing' => ['processing', 'packing', 'shipped', 'delivered', 'cancelled'],
-            'packing' => ['packing', 'shipped', 'delivered', 'cancelled'],
-            'shipped' => ['shipped', 'delivered'],
-            'delivered' => ['delivered'],
+            'processing' => ['payment_confirmed', 'processing', 'packing', 'shipped', 'delivered', 'cancelled'],
+            'packing' => ['payment_confirmed', 'processing', 'packing', 'shipped', 'delivered', 'cancelled'],
+            'shipped' => ['payment_confirmed', 'processing', 'packing', 'shipped', 'delivered', 'cancelled'],
+            'delivered' => ['payment_confirmed', 'processing', 'packing', 'shipped', 'delivered', 'cancelled'],
             'cancelled' => ['cancelled', 'payment_confirmed'],
         ];
         if (!in_array($to, $allowed[$from] ?? [], true)) {

@@ -429,6 +429,7 @@ final class AdminController
         private readonly Auth $auth,
         private readonly AuditLogger $audit,
         private readonly ReferralService $referrals,
+        private readonly NotificationService $notifications,
     ) {
     }
 
@@ -527,7 +528,10 @@ final class AdminController
         $status = (string) $input['status'];
         $now = Security::now();
         if ($status === 'verified') {
+            $before = $this->orders->getOrder((int) $receipt['order_id']);
             $this->orders->updateByAdmin((int) $receipt['order_id'], ['status' => 'payment_confirmed', 'paymentStatus' => 'confirmed'], $context?->userId());
+            $after = $this->orders->getOrder((int) $receipt['order_id']);
+            $this->notifications->notifyOrderStatusChanged($before, $after);
         }
         $this->database->execute('UPDATE payment_receipts SET status = ?, review_note = ?, reviewed_by = ?, reviewed_at = ?, updated_at = ? WHERE id = ? AND status = ?', [$status, $input['reviewNote'] ?? null, $context?->userId(), $now, $now, $receipt['id'], 'submitted']);
         $this->audit->log($context, $request, 'payment_receipt.' . $status, 'order', (string) $receipt['order_public_id'], ['receiptId' => $params['id']], ['status' => $status, 'reviewNote' => $input['reviewNote'] ?? null]);
@@ -855,6 +859,7 @@ final class AdminController
         $this->orders->updateByAdmin((int) $beforeRaw['id'], $input, $context?->userId());
         $after = $this->orders->getOrder((int) $beforeRaw['id']);
         $this->audit->log($context, $request, 'order.updated', 'order', $params['id'], $before, $after);
+        $this->notifications->notifyOrderStatusChanged($before, $after);
         return Response::success(['order' => $after]);
     }
 

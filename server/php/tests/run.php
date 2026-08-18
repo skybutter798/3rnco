@@ -477,6 +477,16 @@ test('referral links apply configurable discounts and pay commission on repeat d
     $paid = callApi($app, 'PATCH', '/api/v1/admin/referral-commissions/' . $approved[0]['id'], ['status' => 'paid', 'note' => 'August partner payout'], ['X-CSRF-Token' => $adminSession['csrf']], [$cookieName => $adminSession['cookie']]);
     assertSameValue(200, $paid->status);
     assertSameValue('paid', $paid->body['data']['commission']['status']);
+
+    $delivered = callApi($app, 'PATCH', '/api/v1/admin/orders/' . $second->body['data']['order']['id'], ['status' => 'delivered'], ['X-CSRF-Token' => $adminSession['csrf']], [$cookieName => $adminSession['cookie']]);
+    assertSameValue(200, $delivered->status);
+    assertSameValue('delivered', $delivered->body['data']['order']['status']);
+    $cancelled = callApi($app, 'PATCH', '/api/v1/admin/orders/' . $second->body['data']['order']['id'], ['status' => 'cancelled'], ['X-CSRF-Token' => $adminSession['csrf']], [$cookieName => $adminSession['cookie']]);
+    assertSameValue(200, $cancelled->status);
+    assertSameValue('cancelled', $cancelled->body['data']['order']['status']);
+    assertSameValue('void', $database->fetchOne('SELECT status FROM referral_commissions ORDER BY id DESC LIMIT 1')['status']);
+    $statusMail = $database->fetchOne("SELECT COUNT(*) AS aggregate FROM notification_deliveries WHERE event_key LIKE ? AND event_type IN ('order.status.updated.customer','order.status.updated.admin')", ['order.status.updated:' . $second->body['data']['order']['id'] . ':%']);
+    assertSameValue(4, (int) $statusMail['aggregate']);
 });
 
 test('order expiry protects payment proofs and safely reinstates a paid cancelled order', function () use ($app, $config, $database, $cookieName, &$adminSession, &$customerSession): void {

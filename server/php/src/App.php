@@ -31,7 +31,7 @@ final class App
         $authController = new AuthController($this->auth, $this->rateLimiter, $audit);
         $accountController = new AccountController($database, $this->auth, $orders, $receipts, $audit, $referrals, $notifications);
         $publicController = new PublicController($database, $orders, $this->rateLimiter, $audit, $referrals, $notifications);
-        $adminController = new AdminController($database, $store, $orders, $uploads, $receipts, $this->auth, $audit, $referrals);
+        $adminController = new AdminController($database, $store, $orders, $uploads, $receipts, $this->auth, $audit, $referrals, $notifications);
 
         $this->routes($storeController, $authController, $accountController, $publicController, $adminController);
     }

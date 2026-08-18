@@ -1469,11 +1469,13 @@ export async function handleAdminOrders(
     return ok({ order: unchanged });
   }
   const transitions: Record<string, string[]> = {
-    PENDING_PAYMENT: ["PAYMENT_CONFIRMED", "CANCELLED"],
-    PAYMENT_CONFIRMED: ["PROCESSING"],
-    PROCESSING: ["PACKING"],
-    PACKING: ["SHIPPED"],
-    SHIPPED: ["DELIVERED"],
+    PENDING_PAYMENT: ["PAYMENT_CONFIRMED", "PROCESSING", "PACKING", "SHIPPED", "DELIVERED", "CANCELLED"],
+    PAYMENT_CONFIRMED: ["PROCESSING", "PACKING", "SHIPPED", "DELIVERED", "CANCELLED"],
+    PROCESSING: ["PAYMENT_CONFIRMED", "PACKING", "SHIPPED", "DELIVERED", "CANCELLED"],
+    PACKING: ["PAYMENT_CONFIRMED", "PROCESSING", "SHIPPED", "DELIVERED", "CANCELLED"],
+    SHIPPED: ["PAYMENT_CONFIRMED", "PROCESSING", "PACKING", "DELIVERED", "CANCELLED"],
+    DELIVERED: ["PAYMENT_CONFIRMED", "PROCESSING", "PACKING", "SHIPPED", "CANCELLED"],
+    CANCELLED: ["PAYMENT_CONFIRMED"],
   };
   if (!transitions[current.status]?.includes(status)) {
     throw new ApiError(
@@ -1482,8 +1484,9 @@ export async function handleAdminOrders(
       `An order cannot move from ${current.status.toLowerCase()} to ${status.toLowerCase()}.`,
     );
   }
-  const paymentStatus =
-    status === "PAYMENT_CONFIRMED" ? "PAID" : current.paymentStatus;
+  const paymentStatus = ["PAYMENT_CONFIRMED", "PROCESSING", "PACKING", "SHIPPED", "DELIVERED"].includes(status)
+    ? "PAID"
+    : current.paymentStatus;
   const transition = await db
     .prepare(
       `UPDATE orders SET status = ?, payment_status = ?, updated_at = unixepoch()

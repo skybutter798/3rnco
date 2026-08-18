@@ -116,6 +116,67 @@ final class NotificationService
         );
     }
 
+    /** @param array<string, mixed> $before @param array<string, mixed> $after */
+    public function notifyOrderStatusChanged(array $before, array $after): void
+    {
+        $previous = (string) ($before['status'] ?? '');
+        $status = (string) ($after['status'] ?? '');
+        if ($status === '' || $status === $previous) return;
+
+        $orderId = (string) ($after['id'] ?? 'unknown');
+        $orderNumber = $this->clean((string) ($after['orderNumber'] ?? $orderId));
+        $customerEmail = $this->validEmail($after['customerEmail'] ?? null);
+        $customerName = $this->clean((string) ($after['customerName'] ?? 'Customer'));
+        $label = ucwords(str_replace('_', ' ', $status));
+        $previousLabel = ucwords(str_replace('_', ' ', $previous));
+        $eventId = Security::uuid();
+
+        if ($customerEmail !== null) {
+            $this->queue(
+                'order.status.updated:' . $orderId . ':' . $eventId . ':customer',
+                'order.status.updated.customer',
+                '[3R&Co] Order ' . $orderNumber . ' is now ' . $label,
+                implode("\n", [
+                    'Hello ' . $customerName . ',',
+                    '',
+                    'Your order status has been updated.',
+                    '',
+                    'Order: ' . $orderNumber,
+                    'Previous status: ' . $previousLabel,
+                    'New status: ' . $label,
+                    'Updated: ' . $this->clean((string) ($after['updatedAt'] ?? Security::now())),
+                    '',
+                    'You can review the order in My Account:',
+                    rtrim($this->config->string('app.origin'), '/') . '/?account=orders',
+                    '',
+                    'If you need help, reply to this email and our care team will assist you.',
+                ]),
+                $this->validEmail($this->config->string('mail.recipient')),
+                $customerEmail,
+            );
+        }
+
+        $this->queue(
+            'order.status.updated:' . $orderId . ':' . $eventId . ':admin',
+            'order.status.updated.admin',
+            '[3R&Co] Order ' . $orderNumber . ' changed to ' . $label,
+            implode("\n", [
+                'An administrator changed an order status.',
+                '',
+                'Order: ' . $orderNumber,
+                'Customer: ' . $customerName,
+                'Email: ' . ($customerEmail ?? ''),
+                'Previous status: ' . $previousLabel,
+                'New status: ' . $label,
+                'Payment status: ' . $this->clean((string) ($after['paymentStatus'] ?? '')),
+                'Updated: ' . $this->clean((string) ($after['updatedAt'] ?? Security::now())),
+                '',
+                'Open admin: ' . $this->config->string('mail.admin_url'),
+            ]),
+            $customerEmail,
+        );
+    }
+
     /** @param array<string, mixed> $enquiry */
     public function notifyNewEnquiry(array $enquiry): void
     {
@@ -182,9 +243,9 @@ final class NotificationService
         return count($rows);
     }
 
-    private function queue(string $eventKey, string $eventType, string $subject, string $body, ?string $replyTo): void
+    private function queue(string $eventKey, string $eventType, string $subject, string $body, ?string $replyTo, ?string $recipientOverride = null): void
     {
-        $recipient = $this->validEmail($this->config->string('mail.recipient'));
+        $recipient = $this->validEmail($recipientOverride ?? $this->config->string('mail.recipient'));
         if ($recipient === null) {
             error_log('[3rnco-mail] Notification recipient is not configured.');
             return;
