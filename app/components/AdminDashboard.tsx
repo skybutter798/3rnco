@@ -13,6 +13,7 @@ import {
   Leaf,
   LockKeyhole,
   LogOut,
+  Menu,
   MessageCircle,
   Package,
   Pencil,
@@ -271,6 +272,7 @@ export default function AdminDashboard(props: Props) {
   const [referralEditor, setReferralEditor] = useState<ReferralLink | null>(null);
   const [customerEditor, setCustomerEditor] = useState<CustomerEditorDraft | null>(null);
   const [activeEnquiryId, setActiveEnquiryId] = useState<string | null>(null);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -676,7 +678,29 @@ export default function AdminDashboard(props: Props) {
 
   return (
     <main className="admin-shell">
-      <aside className="admin-sidebar">
+      <button
+        type="button"
+        className={`admin-nav-scrim ${mobileNavOpen ? "is-visible" : ""}`}
+        onClick={() => setMobileNavOpen(false)}
+        aria-label="Close admin menu"
+        tabIndex={mobileNavOpen ? 0 : -1}
+      />
+      <aside
+        className={`admin-sidebar ${mobileNavOpen ? "is-mobile-open" : ""}`}
+        id="admin-navigation"
+      >
+        <div className="admin-mobile-nav__header">
+          <b>
+            <Menu size={18} /> Admin menu
+          </b>
+          <button
+            type="button"
+            onClick={() => setMobileNavOpen(false)}
+            aria-label="Close admin menu"
+          >
+            <X size={18} />
+          </button>
+        </div>
         <button
           className="admin-logo"
           onClick={onStore}
@@ -696,7 +720,11 @@ export default function AdminDashboard(props: Props) {
           {navItems.filter(([label]) => label !== "Staff Access" || isOwner).filter(([label]) => label !== "Store Settings" || isOwner || locked).map(([label, Icon]) => (
             <button
               className={section === label ? "is-active" : ""}
-              onClick={() => canOpen(label) && setSection(label)}
+              onClick={() => {
+                if (!canOpen(label)) return;
+                setSection(label);
+                setMobileNavOpen(false);
+              }}
               disabled={!canOpen(label)}
               aria-current={section === label ? "page" : undefined}
               title={
@@ -747,6 +775,15 @@ export default function AdminDashboard(props: Props) {
             </span>
           </div>
           <div>
+            <button
+              type="button"
+              className="admin-mobile-menu"
+              onClick={() => setMobileNavOpen(true)}
+              aria-expanded={mobileNavOpen}
+              aria-controls="admin-navigation"
+            >
+              <Menu size={17} /> Menu
+            </button>
             <button
               className="admin-search"
               onClick={() => setSection("Orders")}

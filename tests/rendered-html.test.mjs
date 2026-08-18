@@ -138,6 +138,8 @@ test("includes persistent production commerce and clean seed contracts", async (
   assert.match(account, /View commissions/);
   assert.match(account, /my-referral-commission-report/);
   assert.match(account, /account-nav-label/);
+  assert.match(admin, /admin-mobile-menu/);
+  assert.match(admin, /aria-controls="admin-navigation"/);
   assert.match(account, /referral-jump-button__label/);
   assert.match(account, /referral-jump-button__count/);
   assert.match(admin, /Gift & ritual set builder/);
@@ -198,6 +200,10 @@ test("includes persistent production commerce and clean seed contracts", async (
   assert.match(
     productionCss,
     /\.account-home > nav button\s*\{[^}]*flex-direction:\s*column;/s,
+  );
+  assert.match(
+    css,
+    /\.admin-sidebar\.is-mobile-open\s*\{[^}]*translateX\(0\)/s,
   );
   assert.match(
     productionCss,
