@@ -51,8 +51,6 @@ final class AuthController
         if ($context->authenticated()) {
             throw new ApiException('ALREADY_AUTHENTICATED', 'Sign out before creating another account.', 409);
         }
-        $email = Security::normalizeEmail((string) ($request->input('email') ?? ''));
-        $this->rateLimiter->consume('register-ip-email', $request->remoteAddress . '|' . $email, 3, 3600);
         $result = $this->auth->register($context, $request->json(), $request);
         $this->audit->log(null, $request, 'auth.register', 'user', (string) ($result['user']['id'] ?? ''), null, ['role' => 'customer']);
 

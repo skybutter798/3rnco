@@ -262,6 +262,19 @@ test('registration rejects missing CSRF and passwords shorter than eight charact
     assertSameValue(0, (int) $database->fetchOne("SELECT COUNT(*) AS aggregate FROM users WHERE email = 'blocked@example.test'")['aggregate']);
 });
 
+test('registration validation retries are not rate limited', function () use ($app, $cookieName, &$customerGuest): void {
+    for ($attempt = 0; $attempt < 8; $attempt++) {
+        $response = callApi($app, 'POST', '/api/v1/auth/register', [
+            'fullName' => 'Retry Customer',
+            'email' => 'retry@example.test',
+            'phone' => '+6011222333',
+            'password' => 'Short12',
+        ], ['X-CSRF-Token' => $customerGuest['csrf']], [$cookieName => $customerGuest['cookie']], '198.51.100.88');
+        assertSameValue(422, $response->status);
+        assertSameValue('VALIDATION_FAILED', $response->body['error']['code']);
+    }
+});
+
 test('customer can register, manage full profile and address', function () use ($app, $cookieName, &$customerGuest, &$customerSession): void {
     $registered = callApi($app, 'POST', '/api/v1/auth/register', [
         'fullName' => 'Alya Test', 'email' => 'alya@example.test', 'phone' => '+6011222333', 'password' => '!!!!!!!!',

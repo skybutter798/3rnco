@@ -112,7 +112,7 @@ final class App
         $this->router->add('GET', '/api/v1/storefront', [$store, 'storefront'], ['rate' => ['bucket' => 'storefront', 'limit' => 120, 'window' => 60]]);
 
         $this->router->add('GET', '/api/v1/auth/session', [$auth, 'session'], ['rate' => ['bucket' => 'auth-session', 'limit' => 30, 'window' => 60]]);
-        $this->router->add('POST', '/api/v1/auth/register', [$auth, 'register'], ['csrf' => true, 'rate' => ['bucket' => 'auth-register', 'limit' => 5, 'window' => 3600]]);
+        $this->router->add('POST', '/api/v1/auth/register', [$auth, 'register'], ['csrf' => true]);
         $this->router->add('POST', '/api/v1/auth/login', [$auth, 'login'], ['csrf' => true]);
         $this->router->add('POST', '/api/v1/auth/logout', [$auth, 'logout'], ['auth' => 'user', 'csrf' => true]);
         $this->router->add('POST', '/api/v1/auth/change-password', [$auth, 'changePassword'], ['auth' => 'user', 'csrf' => true, 'rate' => ['bucket' => 'auth-change-password', 'limit' => 5, 'window' => 900]]);
