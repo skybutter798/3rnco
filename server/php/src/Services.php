@@ -790,6 +790,17 @@ final class OrderService
             $status = (string) ($input['status'] ?? $order['status']);
             $this->assertStatusTransition((string) $order['status'], $status);
 
+            $reinstatingPaidOrder = $order['status'] === 'cancelled' && $status === 'payment_confirmed';
+            if ($reinstatingPaidOrder) {
+                $receipt = $this->database->fetchOne(
+                    "SELECT id FROM payment_receipts WHERE order_id = ? AND status IN ('submitted','verified') LIMIT 1",
+                    [$order['id']],
+                );
+                if ($receipt === null) {
+                    throw new ApiException('ORDER_REINSTATEMENT_REQUIRES_PAYMENT', 'Verify a submitted payment proof before reinstating this cancelled order.', 409);
+                }
+            }
+
             $paymentStatus = (string) ($input['paymentStatus'] ?? $order['payment_status']);
             if (in_array($status, ['payment_confirmed', 'processing', 'packing', 'shipped', 'delivered'], true)) {
                 if (!array_key_exists('paymentStatus', $input)) {
@@ -802,6 +813,10 @@ final class OrderService
 
             $now = Security::now();
             $restoredAt = $order['inventory_restored_at'];
+            if ($reinstatingPaidOrder && $restoredAt !== null) {
+                $this->reallocateInventoryLocked($order, $actorUserId, $now);
+                $restoredAt = null;
+            }
             if ($status === 'cancelled' && $restoredAt === null) {
                 $restoredAt = $this->restoreInventoryLocked($order, 'order_cancelled', $actorUserId, $now);
             }
@@ -842,7 +857,8 @@ final class OrderService
         $limit = max(1, min(1000, $limit));
         $now = Security::now();
         $rows = $this->database->fetchAll(
-            "SELECT id FROM orders WHERE status = 'pending_payment' AND inventory_reserved_until IS NOT NULL AND inventory_reserved_until <= ? AND inventory_restored_at IS NULL AND deleted_at IS NULL ORDER BY id LIMIT " . $limit,
+            "SELECT id FROM orders WHERE status = 'pending_payment' AND inventory_reserved_until IS NOT NULL AND inventory_reserved_until <= ? AND inventory_restored_at IS NULL AND deleted_at IS NULL " .
+            "AND NOT EXISTS (SELECT 1 FROM payment_receipts r WHERE r.order_id = orders.id AND r.status IN ('submitted','verified')) ORDER BY id LIMIT " . $limit,
             [$now],
         );
         $released = 0;
@@ -861,6 +877,13 @@ final class OrderService
                     || $order['inventory_reserved_until'] === null
                     || (string) $order['inventory_reserved_until'] > $now
                 ) {
+                    return false;
+                }
+                $receipt = $this->database->fetchOne(
+                    "SELECT id FROM payment_receipts WHERE order_id = ? AND status IN ('submitted','verified') LIMIT 1",
+                    [$order['id']],
+                );
+                if ($receipt !== null) {
                     return false;
                 }
                 $restoredAt = $this->restoreInventoryLocked($order, 'reservation_expired', null, $now);
@@ -1171,7 +1194,7 @@ final class OrderService
             'packing' => ['packing', 'shipped', 'delivered', 'cancelled'],
             'shipped' => ['shipped', 'delivered'],
             'delivered' => ['delivered'],
-            'cancelled' => ['cancelled'],
+            'cancelled' => ['cancelled', 'payment_confirmed'],
         ];
         if (!in_array($to, $allowed[$from] ?? [], true)) {
             throw new ApiException('ORDER_STATUS_INVALID', 'This order status transition is not allowed.', 409);
@@ -1203,6 +1226,50 @@ final class OrderService
         }
 
         return $now;
+    }
+
+    /** @param array<string, mixed> $order */
+    private function reallocateInventoryLocked(array $order, ?int $actorUserId, string $now): void
+    {
+        $lines = $this->database->fetchAll(
+            'SELECT product_id, product_name, unit_price_cents, quantity FROM order_items WHERE order_id = ? ORDER BY id',
+            [$order['id']],
+        );
+        foreach ($lines as $line) {
+            $affected = $this->database->execute(
+                'UPDATE products SET stock_quantity = stock_quantity - ?, updated_at = ? WHERE id = ? AND stock_quantity >= ?',
+                [(int) $line['quantity'], $now, $line['product_id'], (int) $line['quantity']],
+            );
+            if ($affected !== 1) {
+                throw new ApiException('OUT_OF_STOCK', $line['product_name'] . ' does not have enough stock to reinstate this paid order.', 409, ['productId' => $line['product_id']]);
+            }
+            $this->database->execute(
+                'INSERT INTO inventory_movements (product_id, order_id, quantity_delta, reason, actor_user_id, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+                [$line['product_id'], $order['id'], -((int) $line['quantity']), 'order_reinstated', $actorUserId, $now],
+            );
+        }
+
+        if ($order['promo_id'] !== null) {
+            $existing = $this->database->fetchOne('SELECT id FROM promo_redemptions WHERE order_id = ?', [$order['id']]);
+            if ($existing === null) {
+                $pricedLines = array_map(static fn (array $line): array => [
+                    'id' => (string) $line['product_id'],
+                    'price_cents' => (int) $line['unit_price_cents'],
+                ], $lines);
+                $bundleDiscount = $this->bundleDiscount(Security::jsonDecode($order['bundle_metadata_json'] ?? null), $pricedLines);
+                $promoDiscount = max(0, (int) $order['discount_cents'] - (int) $order['referral_discount_cents'] - $bundleDiscount);
+                $this->database->execute(
+                    'INSERT INTO promo_redemptions (promo_id, order_id, user_id, discount_cents, created_at) VALUES (?, ?, ?, ?, ?)',
+                    [$order['promo_id'], $order['id'], $order['customer_id'], $promoDiscount, $now],
+                );
+                $this->database->execute('UPDATE promos SET use_count = use_count + 1, updated_at = ? WHERE id = ?', [$now, $order['promo_id']]);
+            }
+        }
+
+        $this->database->execute(
+            "UPDATE referral_commissions SET status = 'pending', voided_at = NULL, note = NULL, updated_at = ? WHERE order_id = ? AND status = 'void' AND note = 'Order cancelled'",
+            [$now, $order['id']],
+        );
     }
 }
 

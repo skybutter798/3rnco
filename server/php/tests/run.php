@@ -479,7 +479,7 @@ test('referral links apply configurable discounts and pay commission on repeat d
     assertSameValue('paid', $paid->body['data']['commission']['status']);
 });
 
-test('canonical bundle order reserves stock and expiry restores inventory and promo once', function () use ($app, $config, $database, $cookieName, &$adminSession, &$customerSession): void {
+test('order expiry protects payment proofs and safely reinstates a paid cancelled order', function () use ($app, $config, $database, $cookieName, &$adminSession, &$customerSession): void {
     $database->execute("UPDATE bundles SET pricing_mode = 'fixed_discount', fixed_price_cents = 500 WHERE id = 'two-step'");
     foreach (['body-cream' => 1, 'champion-soap' => 0] as $productId => $expectedStock) {
         $stocked = callApi($app, 'PATCH', '/api/v1/admin/products/' . $productId, ['stock' => 1, 'expectedStock' => $expectedStock], ['X-CSRF-Token' => $adminSession['csrf']], [$cookieName => $adminSession['cookie']]);
@@ -531,6 +531,45 @@ test('canonical bundle order reserves stock and expiry restores inventory and pr
     assertSameValue(422, $invalid->status);
     assertSameValue('BUNDLE_INVALID', $invalid->body['error']['code']);
     assertSameValue(1, (int) $database->fetchOne("SELECT stock_quantity FROM products WHERE id = 'body-cream'")['stock_quantity']);
+
+    $orderOwner = $database->fetchOne('SELECT customer_id FROM orders WHERE id = ?', [$internal['id']]);
+    $paymentMethod = $database->fetchOne('SELECT id FROM payment_methods ORDER BY sort_order, id LIMIT 1');
+    $receiptId = '11111111-2222-4333-8444-555555555555';
+    $database->execute(
+        'INSERT INTO payment_receipts (public_id, order_id, customer_id, payment_method_id, storage_key, original_name, mime_type, size_bytes, sha256, customer_reference, customer_note, status, review_note, reviewed_by, reviewed_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [$receiptId, $internal['id'], $orderOwner['customer_id'], $paymentMethod['id'], 'tests/reinstatement.jpg', 'reinstatement.jpg', 'image/jpeg', 10, str_repeat('1', 64), null, null, 'submitted', null, null, null, '2026-01-01 00:00:00', '2026-01-01 00:00:00'],
+    );
+    $verified = callApi($app, 'PATCH', '/api/v1/admin/payment-receipts/' . $receiptId, ['status' => 'verified'], ['X-CSRF-Token' => $adminSession['csrf']], [$cookieName => $adminSession['cookie']]);
+    assertSameValue(200, $verified->status);
+    assertSameValue('payment_confirmed', $verified->body['data']['order']['status']);
+    assertSameValue('confirmed', $verified->body['data']['order']['paymentStatus']);
+    assertSameValue('verified', $verified->body['data']['receipt']['status']);
+    assertSameValue(0, (int) $database->fetchOne("SELECT stock_quantity FROM products WHERE id = 'body-cream'")['stock_quantity']);
+    assertSameValue(0, (int) $database->fetchOne("SELECT stock_quantity FROM products WHERE id = 'champion-soap'")['stock_quantity']);
+    assertSameValue(1, (int) $database->fetchOne("SELECT use_count FROM promos WHERE code = 'TEST10'")['use_count']);
+    assertSameValue(1260, (int) $database->fetchOne('SELECT discount_cents FROM promo_redemptions WHERE order_id = ?', [$internal['id']])['discount_cents']);
+    assertSameValue(2, (int) $database->fetchOne("SELECT COUNT(*) AS aggregate FROM inventory_movements WHERE order_id = ? AND reason = 'order_reinstated'", [$internal['id']])['aggregate']);
+    assertSameValue(null, $database->fetchOne('SELECT inventory_restored_at FROM orders WHERE id = ?', [$internal['id']])['inventory_restored_at']);
+
+    $stocked = callApi($app, 'PATCH', '/api/v1/admin/products/tree-body-oil', ['stock' => 1, 'expectedStock' => 0], ['X-CSRF-Token' => $adminSession['csrf']], [$cookieName => $adminSession['cookie']]);
+    assertSameValue(200, $stocked->status);
+    $protected = callApi($app, 'POST', '/api/v1/orders', [
+        'items' => [['productId' => 'tree-body-oil', 'quantity' => 1]],
+        'shippingAddress' => $body['shippingAddress'],
+        'paymentMethod' => 'manual_confirmation',
+    ], ['X-CSRF-Token' => $customerSession['csrf'], 'Idempotency-Key' => 'receipt-protected-order-0001'], [$cookieName => $customerSession['cookie']]);
+    assertSameValue(201, $protected->status);
+    $protectedOrder = $database->fetchOne('SELECT id, customer_id FROM orders WHERE public_id = ?', [$protected->body['data']['order']['id']]);
+    $database->execute(
+        'INSERT INTO payment_receipts (public_id, order_id, customer_id, payment_method_id, storage_key, original_name, mime_type, size_bytes, sha256, customer_reference, customer_note, status, review_note, reviewed_by, reviewed_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        ['22222222-3333-4444-8555-666666666666', $protectedOrder['id'], $protectedOrder['customer_id'], $paymentMethod['id'], 'tests/protected.jpg', 'protected.jpg', 'image/jpeg', 10, str_repeat('2', 64), null, null, 'submitted', null, null, null, '2026-01-01 00:00:00', '2026-01-01 00:00:00'],
+    );
+    $database->execute("UPDATE orders SET inventory_reserved_until = '2000-01-01 00:00:00' WHERE id = ?", [$protectedOrder['id']]);
+    assertSameValue(0, $service->releaseExpiredReservations());
+    $stillPending = $database->fetchOne('SELECT status, inventory_restored_at FROM orders WHERE id = ?', [$protectedOrder['id']]);
+    assertSameValue('pending_payment', $stillPending['status']);
+    assertSameValue(null, $stillPending['inventory_restored_at']);
+    assertSameValue(0, (int) $database->fetchOne("SELECT stock_quantity FROM products WHERE id = 'tree-body-oil'")['stock_quantity']);
 });
 
 test('public enquiries and newsletter persist without simulation seeds', function () use ($app, $database, $cookieName, &$customerSession): void {
